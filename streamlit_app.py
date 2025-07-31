@@ -144,12 +144,11 @@ ROTAS_POSSIVEIS = {
 # 📊 Função para carregar e processar dados do DataTran
 @st.cache_data
 def carregar_datatran():
-    """Carrega dados do arquivo datatran2025.zip com múltiplas tentativas de encoding"""
+    """Carrega dados do arquivo datatran2025.zip automaticamente"""
     try:
-        # Tentar carregar o arquivo ZIP
-        if 'datatran2025.zip' in st.session_state:
-            with zipfile.ZipFile(st.session_state['datatran2025.zip']) as zip_file:
-                # Procurar arquivo CSV ou Excel dentro do ZIP
+        # Primeiro, tentar carregar do arquivo local no projeto
+        if os.path.exists('datatran2025.zip'):
+            with zipfile.ZipFile('datatran2025.zip') as zip_file:
                 for filename in zip_file.namelist():
                     if filename.endswith(('.csv', '.xlsx')):
                         with zip_file.open(filename) as file:
@@ -159,32 +158,57 @@ def carregar_datatran():
                                 
                                 for encoding in encodings:
                                     try:
-                                        # Reset file pointer
                                         file.seek(0)
                                         df = pd.read_csv(file, encoding=encoding, sep=';')
-                                        st.success(f"✅ DataTran carregado com encoding: {encoding}")
+                                        st.success(f"✅ DataTran carregado automaticamente (encoding: {encoding})")
                                         return df
                                     except UnicodeDecodeError:
                                         continue
-                                    except Exception as e:
-                                        # Tentar com separador diferente
+                                    except Exception:
                                         try:
                                             file.seek(0)
                                             df = pd.read_csv(file, encoding=encoding, sep=',')
-                                            st.success(f"✅ DataTran carregado com encoding: {encoding}")
+                                            st.success(f"✅ DataTran carregado automaticamente (encoding: {encoding})")
                                             return df
                                         except:
                                             continue
-                                
-                                # Se todos os encodings falharem
-                                st.error("❌ Não foi possível decodificar o arquivo CSV. Verifique o formato.")
-                                return None
                             else:
-                                # Para arquivos Excel
                                 df = pd.read_excel(file)
-                                st.success("✅ DataTran carregado (Excel)")
+                                st.success("✅ DataTran carregado automaticamente (Excel)")
                                 return df
+        
+        # Se não encontrou arquivo local, tentar do upload
+        if 'datatran2025.zip' in st.session_state:
+            with zipfile.ZipFile(st.session_state['datatran2025.zip']) as zip_file:
+                for filename in zip_file.namelist():
+                    if filename.endswith(('.csv', '.xlsx')):
+                        with zip_file.open(filename) as file:
+                            if filename.endswith('.csv'):
+                                encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-8-sig']
+                                for encoding in encodings:
+                                    try:
+                                        file.seek(0)
+                                        df = pd.read_csv(file, encoding=encoding, sep=';')
+                                        st.success(f"✅ DataTran carregado do upload (encoding: {encoding})")
+                                        return df
+                                    except UnicodeDecodeError:
+                                        continue
+                                    except Exception:
+                                        try:
+                                            file.seek(0)
+                                            df = pd.read_csv(file, encoding=encoding, sep=',')
+                                            st.success(f"✅ DataTran carregado do upload (encoding: {encoding})")
+                                            return df
+                                        except:
+                                            continue
+                            else:
+                                df = pd.read_excel(file)
+                                st.success("✅ DataTran carregado do upload (Excel)")
+                                return df
+        
+        st.warning("⚠️ Arquivo datatran2025.zip não encontrado - usando dados simulados")
         return None
+        
     except Exception as e:
         st.error(f"Erro ao carregar DataTran: {e}")
         return None
@@ -847,108 +871,92 @@ st.markdown('<div class="main-header"><h1>🛣️ Sistema Inteligente de Rotas</
 
 # Sidebar para controles
 with st.sidebar:
-    st.markdown("### 📁 Upload de Dados")
+    # Upload opcional (só se não encontrar arquivo local)
+    if not os.path.exists('datatran2025.zip'):
+        st.markdown("### 📁 Upload de Dados (Opcional)")
+        
+        uploaded_file = st.file_uploader(
+            "Faça upload do datatran2025.zip (opcional)",
+            type=['zip'],
+            help="Se não carregar, o sistema tentará usar o arquivo local do projeto"
+        )
+        
+        if uploaded_file:
+            st.session_state['datatran2025.zip'] = uploaded_file
+            st.success("✅ Arquivo carregado com sucesso!")
+        
+        st.markdown("---")
     
-    uploaded_file = st.file_uploader(
-        "Faça upload do datatran2025.zip",
-        type=['zip'],
-        help="Arquivo ZIP contendo dados do DataTran 2025"
-    )
-    
-    if uploaded_file:
-        st.session_state['datatran2025.zip'] = uploaded_file
-        st.success("✅ Arquivo carregado com sucesso!")
-    
-    st.markdown("---")
     st.markdown("### 🎯 Rota Personalizada")
     
     # Inicializar lista de rotas selecionadas
     rotas_selecionadas = []
     
-    # Opção entre rotas pré-definidas ou endereços personalizados
-    modo_selecao = st.radio(
-        "Como deseja definir a rota?",
-        ["🏢 Cidades pré-definidas", "📍 Endereços personalizados"],
-        horizontal=True
+    st.markdown("**Digite os endereços de origem e destino:**")
+    
+    endereco_origem = st.text_input(
+        "🏁 Endereço de Origem",
+        placeholder="Ex: Rua das Flores, 123, São Paulo, SP",
+        help="Digite o endereço completo (rua, número, cidade, estado)"
     )
     
-    if modo_selecao == "📍 Endereços personalizados":
-        st.markdown("**Digite os endereços de origem e destino:**")
-        
-        endereco_origem = st.text_input(
-            "🏁 Endereço de Origem",
-            placeholder="Ex: Rua das Flores, 123, São Paulo, SP",
-            help="Digite o endereço completo (rua, número, cidade, estado)"
-        )
-        
-        endereco_destino = st.text_input(
-            "🎯 Endereço de Destino", 
-            placeholder="Ex: Avenida Copacabana, 456, Rio de Janeiro, RJ",
-            help="Digite o endereço completo (rua, número, cidade, estado)"
-        )
-        
-        if endereco_origem and endereco_destino:
-            if st.button("🔍 Buscar Rota Personalizada", type="primary"):
-                with st.spinner("Geocodificando endereços..."):
-                    # Geocodificar origem
-                    result_origem = geocodificar_endereco(endereco_origem)
-                    result_destino = geocodificar_endereco(endereco_destino)
+    endereco_destino = st.text_input(
+        "🎯 Endereço de Destino", 
+        placeholder="Ex: Avenida Copacabana, 456, Rio de Janeiro, RJ",
+        help="Digite o endereço completo (rua, número, cidade, estado)"
+    )
+    
+    if endereco_origem and endereco_destino:
+        if st.button("🔍 Buscar Rota Personalizada", type="primary"):
+            with st.spinner("Geocodificando endereços..."):
+                # Geocodificar origem
+                result_origem = geocodificar_endereco(endereco_origem)
+                result_destino = geocodificar_endereco(endereco_destino)
+                
+                if result_origem['status'] == 'sucesso' and result_destino['status'] == 'sucesso':
+                    # Criar rota personalizada
+                    rota_personalizada = criar_rota_personalizada(
+                        (result_origem['lat'], result_origem['lon']),
+                        (result_destino['lat'], result_destino['lon']),
+                        result_origem['cidade'],
+                        result_destino['cidade']
+                    )
                     
-                    if result_origem['status'] == 'sucesso' and result_destino['status'] == 'sucesso':
-                        # Criar rota personalizada
-                        rota_personalizada = criar_rota_personalizada(
-                            (result_origem['lat'], result_origem['lon']),
-                            (result_destino['lat'], result_destino['lon']),
-                            result_origem['cidade'],
-                            result_destino['cidade']
-                        )
-                        
-                        # Salvar na sessão
-                        st.session_state['rota_personalizada'] = rota_personalizada
-                        st.session_state['enderecos_geocodificados'] = {
-                            'origem': result_origem,
-                            'destino': result_destino
-                        }
-                        
-                        st.success(f"✅ Rota encontrada: {rota_personalizada['distancia']} km, {rota_personalizada['tempo_estimado']}")
-                        
-                    else:
-                        if result_origem['status'] == 'erro':
-                            st.error(f"❌ Origem: {result_origem['message']}")
-                        if result_destino['status'] == 'erro':
-                            st.error(f"❌ Destino: {result_destino['message']}")
-        
-        # Checkbox para incluir rota personalizada se existir
-        if 'rota_personalizada' in st.session_state:
-            rota_pers = st.session_state['rota_personalizada']
-            incluir_personalizada = st.checkbox(
-                f"✅ Incluir rota: {rota_pers['origem_nome']} → {rota_pers['destino_nome']} ({rota_pers['distancia']} km)",
-                value=True
-            )
-            
-            if incluir_personalizada:
-                rotas_selecionadas.append('PERSONALIZADA')
-        
-        st.markdown("---")
+                    # Salvar na sessão
+                    st.session_state['rota_personalizada'] = rota_personalizada
+                    st.session_state['enderecos_geocodificados'] = {
+                        'origem': result_origem,
+                        'destino': result_destino
+                    }
+                    
+                    st.success(f"✅ Rota encontrada: {rota_personalizada['distancia']} km, {rota_personalizada['tempo_estimado']}")
+                    
+                else:
+                    if result_origem['status'] == 'erro':
+                        st.error(f"❌ Origem: {result_origem['message']}")
+                    if result_destino['status'] == 'erro':
+                        st.error(f"❌ Destino: {result_destino['message']}")
     
-    st.markdown("### 🗺️ Configurações do Mapa")
-    
-    # Seleção de múltiplas rotas pré-definidas (só se não estiver no modo personalizado)
-    if modo_selecao == "🏢 Cidades pré-definidas":
-        st.markdown("**Selecione as rotas para análise:**")
+    # Checkbox para incluir rota personalizada se existir
+    if 'rota_personalizada' in st.session_state:
+        rota_pers = st.session_state['rota_personalizada']
+        incluir_personalizada = st.checkbox(
+            f"✅ Incluir rota: {rota_pers['origem_nome']} → {rota_pers['destino_nome']} ({rota_pers['distancia']} km)",
+            value=True
+        )
         
-        for i, ((origem, destino), info) in enumerate(ROTAS_POSSIVEIS.items()):
-            key = f"rota_{i}"
-            if st.checkbox(f"{origem} → {destino} ({info['distancia']}km)", key=key):
-                rotas_selecionadas.append((origem, destino))
+        if incluir_personalizada:
+            rotas_selecionadas.append('PERSONALIZADA')
     
     st.markdown("---")
+    
+    st.markdown("### 🗺️ Configurações do Mapa")
     
     # Toggle para mostrar riscos
     mostrar_riscos = st.toggle(
         "🔥 Exibir Pontos de Risco",
-        value=False,
-        help="Ativa/desativa as bolhas vermelhas de risco no mapa"
+        value=True,  # Ativado por padrão
+        help="Ativa/desativa as bolhas de risco baseadas nos dados do DataTran"
     )
     
     if mostrar_riscos:
@@ -958,12 +966,9 @@ with st.sidebar:
         st.markdown("• **🔴 Vermelho**: Crítico (>0.7) - Local com muitos acidentes/mortes")
         st.markdown("• **🟠 Laranja**: Alto (0.5-0.7) - Acidentes frequentes") 
         st.markdown("• **🟡 Amarelo**: Moderado (<0.5) - Ocorrências ocasionais")
-        st.markdown("**💡 Clique nas bolhas para ver:**")
-        st.markdown("• Dados reais dos acidentes (mortos, feridos, tipo)")
-        st.markdown("• Causas identificadas (velocidade, chuva, etc.)")
-        st.markdown("• Recomendações específicas de direção")
-        st.markdown("• Condições da via e precauções necessárias")
-        st.markdown("**ℹ️ Base de dados: Acidentes de trânsito (DataTran/PRF)**")
+        st.markdown("**💡 Passe o mouse para ver resumo rápido**")
+        st.markdown("**🖱️ Clique nas bolhas para análise detalhada**")
+        st.markdown("**ℹ️ Base: Acidentes de trânsito reais (DataTran/PRF)**")
 
 # Conteúdo principal
 if not rotas_selecionadas:
@@ -1053,7 +1058,7 @@ mapa_data = st_folium(mapa, width=1400, height=700, returned_objects=["last_obje
 if rotas_selecionadas:
     st.markdown("### 📈 Análise Detalhada")
     
-    # Preparar tabs
+    # Preparar tabs só para rotas personalizadas
     tab_names = []
     tab_data = []
     
@@ -1065,21 +1070,12 @@ if rotas_selecionadas:
                 'tipo': 'personalizada',
                 'dados': rota_pers
             })
-        else:
-            origem, destino = rota
-            tab_names.append(f"{origem} → {destino}")
-            tab_data.append({
-                'tipo': 'predefinida',
-                'origem': origem,
-                'destino': destino,
-                'dados': ROTAS_POSSIVEIS[(origem, destino)]
-            })
     
-    tabs = st.tabs(tab_names)
-    
-    for i, tab_info in enumerate(tab_data):
-        with tabs[i]:
-            if tab_info['tipo'] == 'personalizada':
+    if tab_names:  # Só criar tabs se houver rotas personalizadas
+        tabs = st.tabs(tab_names)
+        
+        for i, tab_info in enumerate(tab_data):
+            with tabs[i]:
                 # Rota personalizada
                 rota_dados = tab_info['dados']
                 
@@ -1132,86 +1128,64 @@ if rotas_selecionadas:
                         st.write("✅ Condições ideais para viagem")
                 
                 with col3:
-                    st.markdown("**⚠️ Análise de Riscos**")
-                    st.info("📊 Análise baseada em estimativas para rota personalizada")
+                    st.markdown("**⚠️ Análise de Riscos da Rota**")
                     
-                    # Risco estimado baseado na distância
-                    risco_estimado = min(rota_dados['distancia'] / 1000, 0.8)  # Máximo 0.8
-                    
-                    st.metric("Risco Estimado", f"{risco_estimado:.2f}", "baseado na distância")
-                    
-                    if risco_estimado >= 0.6:
-                        st.warning("🟡 **Rota Longa** - Mais paradas recomendadas")
-                    else:
-                        st.success("🟢 **Rota Adequada**")
-            
-            else:
-                # Rota pré-definida (código original)
-                origem = tab_info['origem']
-                destino = tab_info['destino']
-                rota_info = tab_info['dados']
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.markdown("**📍 Informações da Rota**")
-                    st.write(f"🏁 **Origem:** {origem}")
-                    st.write(f"🎯 **Destino:** {destino}")
-                    st.write(f"📏 **Distância:** {rota_info['distancia']} km")
-                    st.write(f"⏱️ **Tempo Médio:** {rota_info['tempo_medio']}")
-                    st.write(f"🛣️ **BR Principal:** {rota_info['principais_brs'][0]}")
-                    st.write(f"💰 **Pedágios:** {rota_info['pedagios']}")
-                
-                with col2:
-                    st.markdown("**🌤️ Condições Climáticas Reais**")
-                    clima_origem = obter_clima_atual(origem)
-                    clima_destino = obter_clima_atual(destino)
-                    
-                    # Mostrar informações detalhadas
-                    st.write(f"🌡️ **{origem}:**")
-                    st.write(f"   • {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
-                    st.write(f"   • 💧 Umidade: {clima_origem['umidade']}%")
-                    st.write(f"   • 💨 Vento: {clima_origem['vento_kph']} km/h")
-                    st.write(f"   • {clima_origem['api_status']}")
-                    
-                    st.write(f"🌡️ **{destino}:**")
-                    st.write(f"   • {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
-                    st.write(f"   • 💧 Umidade: {clima_destino['umidade']}%")
-                    st.write(f"   • 💨 Vento: {clima_destino['vento_kph']} km/h")
-                    st.write(f"   • {clima_destino['api_status']}")
-                    
-                    # Análise de risco climático combinado
-                    risco_climatico = (clima_origem['risco_climatico'] + clima_destino['risco_climatico']) / 2
-                    
-                    if risco_climatico > 0.6:
-                        st.error(f"🔴 **Alto risco climático:** {risco_climatico:.2f}")
-                        st.write("⚠️ Considere adiar a viagem ou usar rota alternativa")
-                    elif risco_climatico > 0.3:
-                        st.warning(f"🟡 **Risco climático moderado:** {risco_climatico:.2f}")
-                        st.write("⚠️ Atenção redobrada e redução de velocidade")
-                    else:
-                        st.success(f"🟢 **Condições favoráveis:** {risco_climatico:.2f}")
-                        st.write("✅ Condições ideais para viagem")
-                
-                with col3:
-                    st.markdown("**⚠️ Análise de Riscos**")
-                    pontos_risco = calcular_pontos_risco_reais(df_datatran, rota_info)
-                    
-                    if pontos_risco:
-                        risco_medio = np.mean([p["risco"] for p in pontos_risco])
-                        pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
+                    # Calcular pontos de risco para a rota personalizada
+                    if 'coordenadas_rota' in rota_dados and df_datatran is not None:
+                        pontos_risco = calcular_pontos_risco_rota_personalizada(
+                            df_datatran, 
+                            rota_dados.get('coordenadas_rota', [rota_dados['origem_coords'], rota_dados['destino_coords']]),
+                            rota_dados['origem_nome'],
+                            rota_dados['destino_nome']
+                        )
                         
-                        st.metric("Risco Médio", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos")
-                        st.metric("Pontos Críticos", pontos_criticos)
-                        
-                        if risco_medio >= 0.7:
-                            st.error("🔴 **Rota de Alto Risco**")
-                        elif risco_medio >= 0.4:
-                            st.warning("🟡 **Rota de Risco Moderado**")
+                        if pontos_risco:
+                            risco_medio = np.mean([p["risco"] for p in pontos_risco])
+                            pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
+                            
+                            st.metric("Risco Médio da Rota", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos identificados")
+                            st.metric("Pontos Críticos", pontos_criticos)
+                            
+                            if risco_medio >= 0.7:
+                                st.error("🔴 **Rota de Alto Risco**")
+                                st.write("• Múltiplos acidentes registrados")
+                                st.write("• Extrema cautela recomendada")
+                            elif risco_medio >= 0.4:
+                                st.warning("🟡 **Rota de Risco Moderado**")
+                                st.write("• Alguns pontos de atenção")
+                                st.write("• Precauções básicas necessárias")
+                            else:
+                                st.success("🟢 **Rota Relativamente Segura**")
+                                st.write("• Poucos registros de acidentes")
+                                st.write("• Direção defensiva recomendada")
+                            
+                            # Mostrar principais tipos de problemas encontrados
+                            if pontos_risco:
+                                tipos_acidentes = []
+                                for ponto in pontos_risco:
+                                    tipo = ponto.get('detalhes', {}).get('tipo_acidente', '')
+                                    if tipo and tipo != 'N/A':
+                                        tipos_acidentes.append(tipo)
+                                
+                                if tipos_acidentes:
+                                    st.write("**⚠️ Principais riscos identificados:**")
+                                    tipos_unicos = list(set(tipos_acidentes))[:3]  # Top 3
+                                    for tipo in tipos_unicos:
+                                        st.write(f"• {tipo}")
                         else:
-                            st.success("🟢 **Rota Segura**")
+                            st.info("📊 Nenhum ponto de risco específico identificado")
+                            st.write("• Rota com baixo histórico de acidentes")
+                            st.write("• Mantenha precauções normais de trânsito")
                     else:
-                        st.info("📊 Análise baseada em dados históricos")
+                        st.info("📊 Análise baseada em estimativas")
+                        # Risco estimado baseado na distância
+                        risco_estimado = min(rota_dados['distancia'] / 1000, 0.8)
+                        st.metric("Risco Estimado", f"{risco_estimado:.2f}", "baseado na distância")
+                        
+                        if risco_estimado >= 0.6:
+                            st.warning("🟡 **Rota Longa** - Mais paradas recomendadas")
+                        else:
+                            st.success("🟢 **Rota Adequada**")
 
 # Footer com informações
 st.markdown("---")
