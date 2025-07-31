@@ -369,163 +369,166 @@ def criar_rota_personalizada(origem_coords, destino_coords, origem_nome, destino
     }
 # 🔍 Função para gerar explicação inteligente do risco
 def gerar_explicacao_risco(ponto_risco, df_datatran=None):
-    """Gera explicação detalhada do porque do risco e recomendações"""
+    """Gera explicação detalhada baseada nos dados REAIS do DataTran"""
     
     risco = ponto_risco.get("risco", 0.3)
     detalhes = ponto_risco.get("detalhes", {})
     nome = ponto_risco.get("nome", "Ponto de Risco")
     
-    # Análise dos fatores de risco
-    fatores = []
+    # Análise REAL dos dados do DataTran
+    fatores_identificados = []
+    tipo_problema = "trânsito/acidentes"  # Padrão: problemas de trânsito
     recomendacoes = []
-    nivel_blindagem = "não necessária"
     
-    # Analisar mortalidade
+    # 1. ANÁLISE DE MORTALIDADE/GRAVIDADE
     mortos = detalhes.get('mortos', 0)
     feridos_graves = detalhes.get('feridos_graves', 0)
+    feridos_leves = detalhes.get('feridos_leves', 0)
+    total_feridos = detalhes.get('feridos', feridos_graves + feridos_leves)
     
     if mortos > 0:
-        fatores.append(f"❌ {mortos} morte(s) registrada(s)")
-        recomendacoes.append("🚨 Extrema cautela necessária")
-        if mortos >= 2:
-            nivel_blindagem = "altamente recomendada"
+        fatores_identificados.append(f"💀 {mortos} morte(s) em acidentes de trânsito")
+        tipo_problema = "acidentes fatais"
+        recomendacoes.append("🚨 ATENÇÃO MÁXIMA: Local com acidentes mortais")
     
     if feridos_graves > 0:
-        fatores.append(f"🏥 {feridos_graves} ferido(s) grave(s)")
-        recomendacoes.append("⚠️ Risco de acidentes severos")
+        fatores_identificados.append(f"🏥 {feridos_graves} ferido(s) grave(s)")
+        recomendacoes.append("⚠️ Risco alto de acidentes severos")
     
-    # Analisar tipo de acidente
-    tipo_acidente = detalhes.get('tipo_acidente', '').lower()
-    if 'tombamento' in tipo_acidente:
-        fatores.append("🔄 Histórico de tombamentos")
-        recomendacoes.append("📦 Cuidado com carga alta/pesada")
-    elif 'colisão' in tipo_acidente:
-        fatores.append("💥 Histórico de colisões")
-        recomendacoes.append("👀 Mantenha distância segura")
-    elif 'capotamento' in tipo_acidente:
-        fatores.append("🔄 Histórico de capotamentos")
-        recomendacoes.append("🐌 Reduzir velocidade significativamente")
+    if feridos_leves > 0:
+        fatores_identificados.append(f"🩹 {feridos_leves} ferido(s) leve(s)")
     
-    # Analisar localização
-    municipio = detalhes.get('municipio', '').lower()
-    if any(palavra in municipio for palavra in ['rio de janeiro', 'são paulo', 'salvador']):
-        fatores.append("🏙️ Região metropolitana de alta criminalidade")
-        recomendacoes.append("🛡️ Considerar rota alternativa ou escolta")
-        if risco >= 0.7:
-            nivel_blindagem = "recomendada"
+    # 2. ANÁLISE DO TIPO DE ACIDENTE
+    tipo_acidente = str(detalhes.get('tipo_acidente', '')).lower()
+    if tipo_acidente and tipo_acidente != 'n/a':
+        fatores_identificados.append(f"💥 Tipo: {detalhes.get('tipo_acidente', 'N/A')}")
+        
+        if any(palavra in tipo_acidente for palavra in ['tombamento', 'capotamento']):
+            recomendacoes.append("🔄 CUIDADO: Curvas perigosas ou velocidade excessiva")
+            recomendacoes.append("🐌 Reduzir velocidade significativamente")
+        elif any(palavra in tipo_acidente for palavra in ['colisão', 'choque']):
+            recomendacoes.append("👀 ATENÇÃO: Manter distância segura")
+            recomendacoes.append("🚦 Cuidado em cruzamentos e ultrapassagens")
+        elif 'atropelamento' in tipo_acidente:
+            recomendacoes.append("🚶 PERIGO: Área com pedestres")
+            recomendacoes.append("👀 Atenção redobrada para pessoas na via")
     
-    # Classificação de risco por valor
+    # 3. ANÁLISE DA CAUSA DO ACIDENTE
+    causa_acidente = str(detalhes.get('causa_acidente', '')).lower()
+    if causa_acidente and causa_acidente != 'n/a':
+        if any(palavra in causa_acidente for palavra in ['velocidade', 'excesso']):
+            fatores_identificados.append("🏎️ Causa: Velocidade excessiva")
+            recomendacoes.append("🐌 REDUZIR VELOCIDADE obrigatoriamente")
+        elif any(palavra in causa_acidente for palavra in ['sono', 'fadiga', 'cansaço']):
+            fatores_identificados.append("😴 Causa: Sono/fadiga do condutor")
+            recomendacoes.append("☕ Fazer pausas frequentes para descanso")
+        elif any(palavra in causa_acidente for palavra in ['chuva', 'pista molhada']):
+            fatores_identificados.append("🌧️ Causa: Condições climáticas adversas")
+            recomendacoes.append("🌧️ Cuidado extra em dias chuvosos")
+        elif any(palavra in causa_acidente for palavra in ['ultrapassagem', 'conversão']):
+            fatores_identificados.append("🔄 Causa: Manobras perigosas")
+            recomendacoes.append("🚫 Evitar ultrapassagens arriscadas")
+    
+    # 4. ANÁLISE DE CONDIÇÕES DA VIA
+    condicao_meteorologica = str(detalhes.get('condicao_metereologica', '')).lower()
+    if 'chuva' in condicao_meteorologica:
+        fatores_identificados.append("🌧️ Acidentes em condições de chuva")
+        recomendacoes.append("☔ Extremo cuidado em dias chuvosos")
+    
+    tipo_pista = str(detalhes.get('tipo_pista', '')).lower()
+    if 'simples' in tipo_pista:
+        fatores_identificados.append("🛣️ Pista simples (mão dupla)")
+        recomendacoes.append("↔️ Atenção: ultrapassagens em pista dupla")
+    elif 'dupla' in tipo_pista:
+        fatores_identificados.append("🛣️ Pista dupla")
+    
+    # 5. CLASSIFICAÇÃO DE RISCO BASEADA EM DADOS REAIS
     if risco >= 0.8:
         classificacao = "🔴 CRÍTICO"
-        explicacao_geral = "Este ponto apresenta RISCO EXTREMO baseado em dados históricos"
-        nivel_blindagem = "altamente recomendada"
-        recomendacoes.extend([
-            "🚫 EVITAR este trecho se possível",
-            "🛡️ Se inevitável: usar veículo blindado",
-            "👮 Considerar escolta policial",
-            "📱 Manter comunicação constante",
-            "⏰ Evitar horários de pico e madrugada"
-        ])
+        explicacao_geral = f"Este local tem ALTÍSSIMA incidência de acidentes de trânsito"
+        if mortos > 0:
+            explicacao_geral += f" com {mortos} morte(s) registrada(s)"
     elif risco >= 0.6:
-        classificacao = "🟠 ALTO"
-        explicacao_geral = "Este ponto apresenta RISCO ELEVADO que requer precauções especiais"
-        nivel_blindagem = "recomendada para cargas de alto valor"
-        recomendacoes.extend([
-            "🛡️ Veículo blindado recomendado",
-            "👥 Não viajar sozinho",
-            "📍 Evitar paradas desnecessárias",
-            "🌅 Preferir horários diurnos"
-        ])
+        classificacao = "🟠 ALTO RISCO"
+        explicacao_geral = f"Este local apresenta ALTO índice de acidentes"
+        explicacao_geral += f" ({total_feridos} vítimas registradas)" if total_feridos > 0 else ""
     elif risco >= 0.4:
-        classificacao = "🟡 MODERADO"
-        explicacao_geral = "Este ponto apresenta RISCO MODERADO com precauções básicas necessárias"
-        recomendacoes.extend([
-            "👀 Atenção redobrada",
-            "📱 GPS e comunicação ativos",
-            "⛽ Tanque cheio antes de passar",
-            "🚗 Veículo em bom estado"
-        ])
+        classificacao = "🟡 RISCO MODERADO"
+        explicacao_geral = f"Este local tem ocorrências moderadas de acidentes"
     else:
-        classificacao = "🟢 BAIXO"
-        explicacao_geral = "Este ponto apresenta RISCO BAIXO mas ainda requer atenção básica"
-        recomendacoes.extend([
-            "✅ Trânsito relativamente seguro",
-            "🚗 Precauções normais de trânsito",
-            "📱 Manter comunicação de emergência"
-        ])
+        classificacao = "🟢 RISCO BAIXO"
+        explicacao_geral = f"Este local tem baixo histórico de acidentes"
     
-    # Recomendações específicas por horário
-    recomendacoes_horario = []
-    if risco >= 0.5:
-        recomendacoes_horario = [
-            "🌅 MELHOR: 06h-10h (movimento policial)",
-            "⚠️ CUIDADO: 18h-22h (rush + escuridão)",
-            "🚫 EVITAR: 22h-06h (baixo policiamento)"
-        ]
+    # 6. RECOMENDAÇÕES ESPECÍFICAS PARA TRÂNSITO (não criminalidade)
+    recomendacoes_gerais = []
     
-    # Tipo de veículo recomendado
     if risco >= 0.7:
-        veiculo_recomendado = "🛡️ BLINDADO Nível III + escolta"
+        recomendacoes_gerais.extend([
+            "🚨 LOCAL PERIGOSO - máxima atenção",
+            "🐌 Velocidade reduzida obrigatória",
+            "👥 Evitar viajar com sono ou cansaço",
+            "📱 GPS ativo para rotas alternativas"
+        ])
     elif risco >= 0.5:
-        veiculo_recomendado = "🛡️ BLINDADO Nível II ou veículo discreto"
-    elif risco >= 0.3:
-        veiculo_recomendado = "🚗 Veículo comum, evitar ostentação"
+        recomendacoes_gerais.extend([
+            "⚠️ Atenção redobrada necessária",
+            "🚗 Manter veículo em perfeito estado",
+            "👀 Não usar celular ao dirigir",
+            "⛽ Combustível suficiente"
+        ])
     else:
-        veiculo_recomendado = "🚗 Qualquer veículo em bom estado"
+        recomendacoes_gerais.extend([
+            "✅ Trânsito relativamente seguro",
+            "🚗 Precauções normais de direção",
+            "📍 Respeitar sinalização local"
+        ])
     
-    # Montar explicação completa
+    # 7. MONTAR EXPLICAÇÃO FOCADA EM DADOS REAIS
     explicacao_completa = f"""
-<div style='max-width: 350px; font-size: 12px; line-height: 1.3;'>
-    <h4 style='margin: 5px 0; color: #333;'>🎯 {nome}</h4>
-    <h5 style='margin: 5px 0;'>{classificacao} - Risco: {risco:.2f}</h5>
+<div style='max-width: 400px; font-size: 12px; line-height: 1.4;'>
+    <h4 style='margin: 5px 0; color: #333;'>📍 {nome}</h4>
+    <h5 style='margin: 5px 0;'>{classificacao} - Índice: {risco:.2f}</h5>
     
-    <p style='margin: 5px 0; font-weight: bold;'>{explicacao_geral}</p>
+    <p style='margin: 5px 0; font-weight: bold; color: #d63384;'>{explicacao_geral}</p>
     
-    <h6 style='margin: 8px 0 3px 0; color: #d63384;'>📊 FATORES DE RISCO:</h6>
-    <ul style='margin: 0; padding-left: 15px;'>
+    <h6 style='margin: 8px 0 3px 0; color: #dc3545;'>📊 DADOS IDENTIFICADOS:</h6>
+    <ul style='margin: 0; padding-left: 15px; font-size: 11px;'>
 """
     
-    # Adicionar fatores identificados
-    if fatores:
-        for fator in fatores:
+    # Adicionar fatores reais identificados
+    if fatores_identificados:
+        for fator in fatores_identificados[:5]:  # Limitar para não ficar muito grande
             explicacao_completa += f"<li>{fator}</li>"
     else:
-        explicacao_completa += "<li>📈 Análise baseada em padrões estatísticos</li>"
+        explicacao_completa += "<li>📈 Baseado em análise estatística regional</li>"
+    
+    # Adicionar informações da localização
+    municipio = detalhes.get('municipio', 'N/A')
+    if municipio != 'N/A':
+        explicacao_completa += f"<li>📍 Município: {municipio}</li>"
     
     explicacao_completa += f"""
     </ul>
     
-    <h6 style='margin: 8px 0 3px 0; color: #0d6efd;'>🛡️ BLINDAGEM:</h6>
-    <p style='margin: 0 0 5px 0; font-weight: bold;'>{nivel_blindagem.upper()}</p>
-    
-    <h6 style='margin: 8px 0 3px 0; color: #198754;'>🚗 VEÍCULO:</h6>
-    <p style='margin: 0 0 5px 0;'>{veiculo_recomendado}</p>
-    
-    <h6 style='margin: 8px 0 3px 0; color: #fd7e14;'>⚠️ RECOMENDAÇÕES:</h6>
-    <ul style='margin: 0; padding-left: 15px;'>
+    <h6 style='margin: 8px 0 3px 0; color: #fd7e14;'>⚠️ PRECAUÇÕES RECOMENDADAS:</h6>
+    <ul style='margin: 0; padding-left: 15px; font-size: 11px;'>
 """
     
-    # Adicionar recomendações principais
-    for rec in recomendacoes[:4]:  # Limitar para não ficar muito grande
+    # Combinar recomendações específicas e gerais
+    todas_recomendacoes = recomendacoes + recomendacoes_gerais
+    for rec in todas_recomendacoes[:6]:  # Máximo 6 recomendações
         explicacao_completa += f"<li>{rec}</li>"
     
-    # Adicionar recomendações de horário se relevante
-    if recomendacoes_horario:
-        explicacao_completa += """
+    explicacao_completa += f"""
     </ul>
     
-    <h6 style='margin: 8px 0 3px 0; color: #6f42c1;'>⏰ HORÁRIOS:</h6>
-    <ul style='margin: 0; padding-left: 15px;'>
-"""
-        for rec_h in recomendacoes_horario:
-            explicacao_completa += f"<li>{rec_h}</li>"
-    
-    explicacao_completa += """
-    </ul>
-    
-    <p style='margin: 8px 0 0 0; font-size: 10px; color: #666;'>
-        💡 Análise baseada em dados históricos do DataTran e padrões de criminalidade
-    </p>
+    <div style='margin: 8px 0; padding: 5px; background: #f8f9fa; border-left: 3px solid #0d6efd;'>
+        <strong>💡 SOBRE OS DADOS:</strong><br>
+        <span style='font-size: 10px;'>
+        Análise baseada em registros reais de acidentes do DataTran/PRF. 
+        Este local apresenta padrão de <strong>{tipo_problema}</strong> que requer atenção especial.
+        </span>
+    </div>
 </div>
 """
     
@@ -951,15 +954,16 @@ with st.sidebar:
     if mostrar_riscos:
         st.markdown("🔴 **Modo Risco Ativado**")
         st.markdown("**📊 Interpretação das Bolhas:**")
-        st.markdown("• **Tamanho**: Proporcional ao nível de risco")
-        st.markdown("• **🔴 Vermelho**: Crítico (>0.7) - Blindagem altamente recomendada")
-        st.markdown("• **🟠 Laranja**: Alto (0.5-0.7) - Blindagem recomendada")
-        st.markdown("• **🟡 Amarelo**: Moderado (<0.5) - Precauções básicas")
-        st.markdown("**💡 Clique nas bolhas para:**")
-        st.markdown("• Ver análise detalhada dos fatores de risco")
-        st.markdown("• Recomendações de blindagem e veículo")
-        st.markdown("• Melhores horários para trafegar")
-        st.markdown("• Estratégias de segurança específicas")
+        st.markdown("• **Tamanho**: Proporcional ao índice de acidentes")
+        st.markdown("• **🔴 Vermelho**: Crítico (>0.7) - Local com muitos acidentes/mortes")
+        st.markdown("• **🟠 Laranja**: Alto (0.5-0.7) - Acidentes frequentes") 
+        st.markdown("• **🟡 Amarelo**: Moderado (<0.5) - Ocorrências ocasionais")
+        st.markdown("**💡 Clique nas bolhas para ver:**")
+        st.markdown("• Dados reais dos acidentes (mortos, feridos, tipo)")
+        st.markdown("• Causas identificadas (velocidade, chuva, etc.)")
+        st.markdown("• Recomendações específicas de direção")
+        st.markdown("• Condições da via e precauções necessárias")
+        st.markdown("**ℹ️ Base de dados: Acidentes de trânsito (DataTran/PRF)**")
 
 # Conteúdo principal
 if not rotas_selecionadas:
