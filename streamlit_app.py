@@ -144,7 +144,7 @@ ROTAS_POSSIVEIS = {
 # 📊 Função para carregar e processar dados do DataTran
 @st.cache_data
 def carregar_datatran():
-    """Carrega dados do arquivo datatran2025.zip"""
+    """Carrega dados do arquivo datatran2025.zip com múltiplas tentativas de encoding"""
     try:
         # Tentar carregar o arquivo ZIP
         if 'datatran2025.zip' in st.session_state:
@@ -154,16 +154,103 @@ def carregar_datatran():
                     if filename.endswith(('.csv', '.xlsx')):
                         with zip_file.open(filename) as file:
                             if filename.endswith('.csv'):
-                                df = pd.read_csv(file, encoding='utf-8')
+                                # Tentar diferentes encodings para CSV
+                                encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-8-sig']
+                                
+                                for encoding in encodings:
+                                    try:
+                                        # Reset file pointer
+                                        file.seek(0)
+                                        df = pd.read_csv(file, encoding=encoding, sep=';')
+                                        st.success(f"✅ DataTran carregado com encoding: {encoding}")
+                                        return df
+                                    except UnicodeDecodeError:
+                                        continue
+                                    except Exception as e:
+                                        # Tentar com separador diferente
+                                        try:
+                                            file.seek(0)
+                                            df = pd.read_csv(file, encoding=encoding, sep=',')
+                                            st.success(f"✅ DataTran carregado com encoding: {encoding}")
+                                            return df
+                                        except:
+                                            continue
+                                
+                                # Se todos os encodings falharem
+                                st.error("❌ Não foi possível decodificar o arquivo CSV. Verifique o formato.")
+                                return None
                             else:
+                                # Para arquivos Excel
                                 df = pd.read_excel(file)
-                        return df
+                                st.success("✅ DataTran carregado (Excel)")
+                                return df
         return None
     except Exception as e:
         st.error(f"Erro ao carregar DataTran: {e}")
         return None
 
-# 🔥 Função para calcular pontos de risco baseado nos dados reais
+# 🔍 Função para geocodificar endereços usando Nominatim (gratuito)
+@st.cache_data(ttl=3600)  # Cache por 1 hora
+def geocodificar_endereco(endereco):
+    """Converte endereço em coordenadas usando Nominatim (OpenStreetMap)"""
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            'q': f"{endereco}, Brasil",
+            'format': 'json',
+            'limit': 1,
+            'addressdetails': 1
+        }
+        headers = {
+            'User-Agent': 'Sistema-Rotas-App/1.0'  # Nominatim exige User-Agent
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                resultado = data[0]
+                return {
+                    'lat': float(resultado['lat']),
+                    'lon': float(resultado['lon']),
+                    'display_name': resultado['display_name'],
+                    'cidade': resultado.get('address', {}).get('city', endereco),
+                    'status': 'sucesso'
+                }
+        
+        return {'status': 'erro', 'message': 'Endereço não encontrado'}
+        
+    except Exception as e:
+        return {'status': 'erro', 'message': f'Erro na geocodificação: {str(e)[:50]}...'}
+
+# 🗺️ Função para criar rota personalizada entre dois endereços
+def criar_rota_personalizada(origem_coords, destino_coords, origem_nome, destino_nome):
+    """Calcula distância e cria informações de rota entre coordenadas personalizadas"""
+    from math import radians, cos, sin, asin, sqrt
+    
+    # Fórmula de Haversine para calcular distância
+    def haversine(lon1, lat1, lon2, lat2):
+        lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+        dlon = lon2 - lon1
+        dlat = lat2 - lat1
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c = 2 * asin(sqrt(a))
+        r = 6371  # Raio da Terra em km
+        return c * r
+    
+    distancia = haversine(origem_coords[1], origem_coords[0], destino_coords[1], destino_coords[0])
+    tempo_estimado = distancia / 80  # Velocidade média 80 km/h
+    
+    return {
+        'distancia': round(distancia, 1),
+        'tempo_estimado': f"{int(tempo_estimado)}h{int((tempo_estimado % 1) * 60)}min",
+        'origem_nome': origem_nome,
+        'destino_nome': destino_nome,
+        'origem_coords': origem_coords,
+        'destino_coords': destino_coords,
+        'personalizada': True
+    }
 def calcular_pontos_risco_reais(df_datatran, rota_info):
     """Calcula pontos de risco baseado nos dados reais do DataTran"""
     pontos_risco = []
@@ -212,83 +299,130 @@ def criar_mapa_rotas(rotas_selecionadas, mostrar_riscos, df_datatran):
     mapa = folium.Map(
         location=[-23.5505, -46.6333],
         zoom_start=6,
-        tiles="OpenStreetMap"
+        tiles="OpenStreetMap",
+        width='100%',  # Largura total disponível
+        height='100%'  # Altura total disponível
+    )
+    
+def criar_mapa_rotas(rotas_selecionadas, mostrar_riscos, df_datatran):
+    """Cria mapa com múltiplas rotas e pontos de risco"""
+    
+    # Centro do Brasil (aproximadamente)
+    mapa = folium.Map(
+        location=[-23.5505, -46.6333],
+        zoom_start=6,
+        tiles="OpenStreetMap",
+        width='100%',  # Largura total disponível
+        height='100%'  # Altura total disponível
     )
     
     # Cores para diferentes rotas
     cores_rotas = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3']
     
-    for i, (origem, destino) in enumerate(rotas_selecionadas):
-        rota_info = ROTAS_POSSIVEIS.get((origem, destino))
-        if not rota_info:
-            continue
-            
+    for i, rota in enumerate(rotas_selecionadas):
         cor_rota = cores_rotas[i % len(cores_rotas)]
         
-        # Adicionar linha da rota
-        folium.PolyLine(
-            locations=[CIDADES_BASE[origem]["coords"], CIDADES_BASE[destino]["coords"]],
-            color=cor_rota,
-            weight=6,
-            opacity=0.8,
-            popup=f"<b>{origem} → {destino}</b><br>"
-                  f"📏 {rota_info['distancia']} km<br>"
-                  f"⏱️ {rota_info['tempo_medio']}<br>"
-                  f"🛣️ BR-{rota_info['principais_brs']}<br>"
-                  f"💰 {rota_info['pedagios']} pedágios"
-        ).add_to(mapa)
-        
-        # Marcadores das cidades
-        for cidade in [origem, destino]:
-            cidade_info = CIDADES_BASE[cidade]
-            icon_color = 'green' if cidade == destino else 'blue'
+        # Verificar se é rota personalizada
+        if rota == 'PERSONALIZADA' and 'rota_personalizada' in st.session_state:
+            rota_pers = st.session_state['rota_personalizada']
+            
+            # Adicionar linha da rota personalizada
+            folium.PolyLine(
+                locations=[rota_pers['origem_coords'], rota_pers['destino_coords']],
+                color=cor_rota,
+                weight=6,
+                opacity=0.8,
+                popup=f"<b>ROTA PERSONALIZADA</b><br>"
+                      f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}<br>"
+                      f"📏 {rota_pers['distancia']} km<br>"
+                      f"⏱️ {rota_pers['tempo_estimado']}<br>"
+                      f"🛣️ Rota personalizada"
+            ).add_to(mapa)
+            
+            # Marcadores para rota personalizada
+            folium.Marker(
+                location=rota_pers['origem_coords'],
+                popup=f"<b>🏁 ORIGEM</b><br>{rota_pers['origem_nome']}",
+                icon=folium.Icon(color='blue', icon='play')
+            ).add_to(mapa)
             
             folium.Marker(
-                location=cidade_info["coords"],
-                popup=f"<b>{cidade}</b><br>"
-                      f"👥 {cidade_info['pop']:,} hab<br>"
-                      f"⚠️ Risco base: {cidade_info['risco_base']:.1f}",
-                icon=folium.Icon(color=icon_color, icon='info-sign')
+                location=rota_pers['destino_coords'],
+                popup=f"<b>🎯 DESTINO</b><br>{rota_pers['destino_nome']}",
+                icon=folium.Icon(color='green', icon='stop')
             ).add_to(mapa)
-        
-        # Adicionar pontos de risco se ativado
-        if mostrar_riscos:
-            pontos_risco = calcular_pontos_risco_reais(df_datatran, rota_info)
             
-            for ponto in pontos_risco:
-                # Tamanho da bolha baseado no nível de risco
-                raio = 5 + (ponto["risco"] * 15)  # 5-20px
+        else:
+            # Rota pré-definida
+            origem, destino = rota
+            rota_info = ROTAS_POSSIVEIS.get((origem, destino))
+            if not rota_info:
+                continue
                 
-                # Cor da bolha baseada no risco
-                if ponto["risco"] >= 0.7:
-                    cor_bolha = '#FF0000'  # Vermelho forte
-                elif ponto["risco"] >= 0.5:
-                    cor_bolha = '#FF6600'  # Laranja
-                else:
-                    cor_bolha = '#FFD700'  # Amarelo
+            # Adicionar linha da rota
+            folium.PolyLine(
+                locations=[CIDADES_BASE[origem]["coords"], CIDADES_BASE[destino]["coords"]],
+                color=cor_rota,
+                weight=6,
+                opacity=0.8,
+                popup=f"<b>{origem} → {destino}</b><br>"
+                      f"📏 {rota_info['distancia']} km<br>"
+                      f"⏱️ {rota_info['tempo_medio']}<br>"
+                      f"🛣️ BR-{rota_info['principais_brs']}<br>"
+                      f"💰 {rota_info['pedagios']} pedágios"
+            ).add_to(mapa)
+            
+            # Marcadores das cidades
+            for cidade in [origem, destino]:
+                cidade_info = CIDADES_BASE[cidade]
+                icon_color = 'green' if cidade == destino else 'blue'
                 
-                # Criar popup com detalhes
-                popup_content = f"<b>⚠️ {ponto['nome']}</b><br>"
-                popup_content += f"🔥 Nível de Risco: {ponto['risco']:.2f}<br>"
-                
-                if 'detalhes' in ponto:
-                    detalhes = ponto['detalhes']
-                    popup_content += f"📍 {detalhes.get('municipio', 'N/A')}<br>"
-                    popup_content += f"💥 {detalhes.get('tipo_acidente', 'N/A')}<br>"
-                    if detalhes.get('mortos', 0) > 0:
-                        popup_content += f"💀 Mortos: {detalhes['mortos']}<br>"
-                    if detalhes.get('feridos', 0) > 0:
-                        popup_content += f"🏥 Feridos: {detalhes['feridos']}<br>"
-                
-                folium.CircleMarker(
-                    location=ponto["coords"],
-                    radius=raio,
-                    popup=popup_content,
-                    color='darkred',
-                    fillColor=cor_bolha,
-                    fillOpacity=0.7,
-                    weight=2
+                folium.Marker(
+                    location=cidade_info["coords"],
+                    popup=f"<b>{cidade}</b><br>"
+                          f"👥 {cidade_info['pop']:,} hab<br>"
+                          f"⚠️ Risco base: {cidade_info['risco_base']:.1f}",
+                    icon=folium.Icon(color=icon_color, icon='info-sign')
                 ).add_to(mapa)
+            
+            # Adicionar pontos de risco se ativado
+            if mostrar_riscos:
+                pontos_risco = calcular_pontos_risco_reais(df_datatran, rota_info)
+                
+                for ponto in pontos_risco:
+                    # Tamanho da bolha baseado no nível de risco
+                    raio = 5 + (ponto["risco"] * 15)  # 5-20px
+                    
+                    # Cor da bolha baseada no risco
+                    if ponto["risco"] >= 0.7:
+                        cor_bolha = '#FF0000'  # Vermelho forte
+                    elif ponto["risco"] >= 0.5:
+                        cor_bolha = '#FF6600'  # Laranja
+                    else:
+                        cor_bolha = '#FFD700'  # Amarelo
+                    
+                    # Criar popup com detalhes
+                    popup_content = f"<b>⚠️ {ponto['nome']}</b><br>"
+                    popup_content += f"🔥 Nível de Risco: {ponto['risco']:.2f}<br>"
+                    
+                    if 'detalhes' in ponto:
+                        detalhes = ponto['detalhes']
+                        popup_content += f"📍 {detalhes.get('municipio', 'N/A')}<br>"
+                        popup_content += f"💥 {detalhes.get('tipo_acidente', 'N/A')}<br>"
+                        if detalhes.get('mortos', 0) > 0:
+                            popup_content += f"💀 Mortos: {detalhes['mortos']}<br>"
+                        if detalhes.get('feridos', 0) > 0:
+                            popup_content += f"🏥 Feridos: {detalhes['feridos']}<br>"
+                    
+                    folium.CircleMarker(
+                        location=ponto["coords"],
+                        radius=raio,
+                        popup=popup_content,
+                        color='darkred',
+                        fillColor=cor_bolha,
+                        fillOpacity=0.7,
+                        weight=2
+                    ).add_to(mapa)
     
     return mapa
 
@@ -420,6 +554,74 @@ with st.sidebar:
         st.success("✅ Arquivo carregado com sucesso!")
     
     st.markdown("---")
+    st.markdown("### 🎯 Rota Personalizada")
+    
+    # Opção entre rotas pré-definidas ou endereços personalizados
+    modo_selecao = st.radio(
+        "Como deseja definir a rota?",
+        ["🏢 Cidades pré-definidas", "📍 Endereços personalizados"],
+        horizontal=True
+    )
+    
+    if modo_selecao == "📍 Endereços personalizados":
+        st.markdown("**Digite os endereços de origem e destino:**")
+        
+        endereco_origem = st.text_input(
+            "🏁 Endereço de Origem",
+            placeholder="Ex: Rua das Flores, 123, São Paulo, SP",
+            help="Digite o endereço completo (rua, número, cidade, estado)"
+        )
+        
+        endereco_destino = st.text_input(
+            "🎯 Endereço de Destino", 
+            placeholder="Ex: Avenida Copacabana, 456, Rio de Janeiro, RJ",
+            help="Digite o endereço completo (rua, número, cidade, estado)"
+        )
+        
+        if endereco_origem and endereco_destino:
+            if st.button("🔍 Buscar Rota Personalizada", type="primary"):
+                with st.spinner("Geocodificando endereços..."):
+                    # Geocodificar origem
+                    result_origem = geocodificar_endereco(endereco_origem)
+                    result_destino = geocodificar_endereco(endereco_destino)
+                    
+                    if result_origem['status'] == 'sucesso' and result_destino['status'] == 'sucesso':
+                        # Criar rota personalizada
+                        rota_personalizada = criar_rota_personalizada(
+                            (result_origem['lat'], result_origem['lon']),
+                            (result_destino['lat'], result_destino['lon']),
+                            result_origem['cidade'],
+                            result_destino['cidade']
+                        )
+                        
+                        # Salvar na sessão
+                        st.session_state['rota_personalizada'] = rota_personalizada
+                        st.session_state['enderecos_geocodificados'] = {
+                            'origem': result_origem,
+                            'destino': result_destino
+                        }
+                        
+                        st.success(f"✅ Rota encontrada: {rota_personalizada['distancia']} km, {rota_personalizada['tempo_estimado']}")
+                        
+                    else:
+                        if result_origem['status'] == 'erro':
+                            st.error(f"❌ Origem: {result_origem['message']}")
+                        if result_destino['status'] == 'erro':
+                            st.error(f"❌ Destino: {result_destino['message']}")
+        
+        # Checkbox para incluir rota personalizada se existir
+        if 'rota_personalizada' in st.session_state:
+            rota_pers = st.session_state['rota_personalizada']
+            incluir_personalizada = st.checkbox(
+                f"✅ Incluir rota: {rota_pers['origem_nome']} → {rota_pers['destino_nome']} ({rota_pers['distancia']} km)",
+                value=True
+            )
+            
+            if incluir_personalizada:
+                rotas_selecionadas.append('PERSONALIZADA')
+        
+        st.markdown("---")
+    
     st.markdown("### 🗺️ Configurações do Mapa")
     
     # Seleção de múltiplas rotas
@@ -479,7 +681,7 @@ for i, (origem, destino) in enumerate(rotas_selecionadas):
 st.markdown("### 🗺️ Mapa Interativo de Rotas")
 
 mapa = criar_mapa_rotas(rotas_selecionadas, mostrar_riscos, df_datatran)
-mapa_data = st_folium(mapa, width=1200, height=600)
+mapa_data = st_folium(mapa, width=1400, height=700, returned_objects=["last_object_clicked"])
 
 # Análise detalhada das rotas
 if rotas_selecionadas:
