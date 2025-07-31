@@ -57,13 +57,13 @@ CIDADES_BASE = {
         "coords": (-22.9068, -43.1729),
         "pop": 6700000,
         "risco_base": 0.7,
-        "principais_brs": [116, 040, 101]
+        "principais_brs": [116, 40, 101]  # BR-040 corrigido para 40
     },
     "Belo Horizonte": {
         "coords": (-19.9167, -43.9345),
         "pop": 2500000,
         "risco_base": 0.4,
-        "principais_brs": [381, 040, 262]
+        "principais_brs": [381, 40, 262]  # BR-040 corrigido para 40
     },
     "Campinas": {
         "coords": (-22.9056, -47.0608),
@@ -132,7 +132,7 @@ ROTAS_POSSIVEIS = {
     ("Rio de Janeiro", "Belo Horizonte"): {
         "distancia": 441,
         "tempo_medio": "6h00min",
-        "principais_brs": [040],
+        "principais_brs": [40],  # BR-040 corrigido
         "pedagios": 6,
         "pontos_risco": [
             {"nome": "BR-040 Juiz de Fora", "coords": (-21.7642, -43.3503), "risco": 0.5},
