@@ -1132,61 +1132,60 @@ if rotas_selecionadas:
                     st.markdown("**⚠️ Análise de Riscos da Rota**")
                     
                     # Calcular pontos de risco para a rota personalizada
-                    if 'coordenadas_rota' in rota_dados and df_datatran is not None:
-                        pontos_risco = calcular_pontos_risco_rota_personalizada(
-                            df_datatran, 
-                            rota_dados.get('coordenadas_rota', [rota_dados['origem_coords'], rota_dados['destino_coords']]),
-                            rota_dados['origem_nome'],
-                            rota_dados['destino_nome']
-                        )
-                        
-                        if pontos_risco:
-                            risco_medio = np.mean([p["risco"] for p in pontos_risco])
-                            pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
-                            
-                            st.metric("Risco Médio da Rota", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos identificados")
-                            st.metric("Pontos Críticos", pontos_criticos)
-                            
-                            if risco_medio >= 0.7:
-                                st.error("🔴 **Rota de Alto Risco**")
-                                st.write("• Múltiplos acidentes registrados")
-                                st.write("• Extrema cautela recomendada")
-                            elif risco_medio >= 0.4:
-                                st.warning("🟡 **Rota de Risco Moderado**")
-                                st.write("• Alguns pontos de atenção")
-                                st.write("• Precauções básicas necessárias")
-                            else:
-                                st.success("🟢 **Rota Relativamente Segura**")
-                                st.write("• Poucos registros de acidentes")
-                                st.write("• Direção defensiva recomendada")
-                            
-                            # Mostrar principais tipos de problemas encontrados
+                        if 'coordenadas_rota' in rota_dados and df_datatran is not None:
+                            pontos_risco = calcular_pontos_risco_rota_personalizada(
+                                df_datatran, 
+                                rota_dados.get('coordenadas_rota', [rota_dados['origem_coords'], rota_dados['destino_coords']]),
+                                rota_dados['origem_nome'],
+                                rota_dados['destino_nome']
+                            )
                             if pontos_risco:
-                                tipos_acidentes = []
-                                for ponto in pontos_risco:
-                                    tipo = ponto.get('detalhes', {}).get('tipo_acidente', '')
-                                    if tipo and tipo != 'N/A':
-                                        tipos_acidentes.append(tipo)
+                                risco_medio = np.mean([p["risco"] for p in pontos_risco])
+                                pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
                                 
-                                if tipos_acidentes:
-                                    st.write("**⚠️ Principais riscos identificados:**")
-                                    tipos_unicos = list(set(tipos_acidentes))[:3]  # Top 3
-                                    for tipo in tipos_unicos:
-                                        st.write(f"• {tipo}")
+                                st.metric("Risco Médio da Rota", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos identificados")
+                                st.metric("Pontos Críticos", pontos_criticos)
+                                
+                                if risco_medio >= 0.7:
+                                    st.error("🔴 **Rota de Alto Risco**")
+                                    st.write("• Múltiplos acidentes registrados")
+                                    st.write("• Extrema cautela recomendada")
+                                elif risco_medio >= 0.4:
+                                    st.warning("🟡 **Rota de Risco Moderado**")
+                                    st.write("• Alguns pontos de atenção")
+                                    st.write("• Precauções básicas necessárias")
+                                else:
+                                    st.success("🟢 **Rota Relativamente Segura**")
+                                    st.write("• Poucos registros de acidentes")
+                                    st.write("• Direção defensiva recomendada")
+                                
+                                # Mostrar principais tipos de problemas encontrados
+                                if pontos_risco:
+                                    tipos_acidentes = []
+                                    for ponto in pontos_risco:
+                                        tipo = ponto.get('detalhes', {}).get('tipo_acidente', '')
+                                        if tipo and tipo != 'N/A':
+                                            tipos_acidentes.append(tipo)
+                                    
+                                    if tipos_acidentes:
+                                        st.write("**⚠️ Principais riscos identificados:**")
+                                        tipos_unicos = list(set(tipos_acidentes))[:3]  # Top 3
+                                        for tipo in tipos_unicos:
+                                            st.write(f"• {tipo}")
+                            else:
+                                st.info("📊 Nenhum ponto de risco específico identificado")
+                                st.write("• Rota com baixo histórico de acidentes")
+                                st.write("• Mantenha precauções normais de trânsito")
                         else:
-                            st.info("📊 Nenhum ponto de risco específico identificado")
-                            st.write("• Rota com baixo histórico de acidentes")
-                            st.write("• Mantenha precauções normais de trânsito")
-                    else:
-                        st.info("📊 Análise baseada em estimativas")
-                        # Risco estimado baseado na distância
-                        risco_estimado = min(rota_dados['distancia'] / 1000, 0.8)
-                        st.metric("Risco Estimado", f"{risco_estimado:.2f}", "baseado na distância")
-                        
-                        if risco_estimado >= 0.6:
-                            st.warning("🟡 **Rota Longa** - Mais paradas recomendadas")
-                        else:
-                            st.success("🟢 **Rota Adequada**")
+                            st.info("📊 Análise baseada em estimativas")
+                            # Risco estimado baseado na distância
+                            risco_estimado = min(rota_dados['distancia'] / 1000, 0.8)
+                            st.metric("Risco Estimado", f"{risco_estimado:.2f}", "baseado na distância")
+                            
+                            if risco_estimado >= 0.6:
+                                st.warning("🟡 **Rota Longa** - Mais paradas recomendadas")
+                            else:
+                                st.success("🟢 **Rota Adequada**")
 
 # Footer com informações
 st.markdown("---")
