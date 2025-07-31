@@ -8,6 +8,7 @@ from datetime import datetime
 import zipfile
 import io
 import random
+import os  # Adicionado para verificar arquivos
 
 # ⚙️ Configurações
 st.set_page_config(
