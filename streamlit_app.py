@@ -704,18 +704,42 @@ else:
     st.warning("⚠️ Usando dados simulados. Faça upload do datatran2025.zip para análise real.")
 
 # Métricas das rotas selecionadas
-st.markdown("### 📊 Resumo das Rotas Selecionadas")
+if rotas_selecionadas:
+    st.markdown("### 📊 Resumo das Rotas Selecionadas")
 
-cols = st.columns(min(len(rotas_selecionadas), 4))
-for i, (origem, destino) in enumerate(rotas_selecionadas):
-    rota_info = ROTAS_POSSIVEIS[(origem, destino)]
+    # Preparar dados para métricas
+    metricas_rotas = []
     
-    with cols[i % 4]:
-        st.metric(
-            label=f"{origem} → {destino}",
-            value=f"{rota_info['distancia']} km",
-            delta=f"{rota_info['tempo_medio']}"
-        )
+    for rota in rotas_selecionadas:
+        if rota == 'PERSONALIZADA' and 'rota_personalizada' in st.session_state:
+            rota_pers = st.session_state['rota_personalizada']
+            metricas_rotas.append({
+                'nome': f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}",
+                'distancia': rota_pers['distancia'],
+                'tempo': rota_pers['tempo_estimado'],
+                'tipo': 'personalizada'
+            })
+        else:
+            # Rota pré-definida (tupla)
+            origem, destino = rota
+            rota_info = ROTAS_POSSIVEIS[(origem, destino)]
+            metricas_rotas.append({
+                'nome': f"{origem} → {destino}",
+                'distancia': rota_info['distancia'],
+                'tempo': rota_info['tempo_medio'],
+                'tipo': 'predefinida'
+            })
+    
+    # Exibir métricas
+    cols = st.columns(min(len(metricas_rotas), 4))
+    for i, metrica in enumerate(metricas_rotas):
+        with cols[i % 4]:
+            emoji = "🎯" if metrica['tipo'] == 'personalizada' else "🏢"
+            st.metric(
+                label=f"{emoji} {metrica['nome']}",
+                value=f"{metrica['distancia']} km",
+                delta=f"{metrica['tempo']}"
+            )
 
 # Mapa principal
 st.markdown("### 🗺️ Mapa Interativo de Rotas")
@@ -727,73 +751,158 @@ mapa_data = st_folium(mapa, width=1400, height=700, returned_objects=["last_obje
 if rotas_selecionadas:
     st.markdown("### 📈 Análise Detalhada")
     
-    tabs = st.tabs([f"{origem} → {destino}" for origem, destino in rotas_selecionadas])
+    # Preparar tabs
+    tab_names = []
+    tab_data = []
     
-    for i, (origem, destino) in enumerate(rotas_selecionadas):
+    for rota in rotas_selecionadas:
+        if rota == 'PERSONALIZADA' and 'rota_personalizada' in st.session_state:
+            rota_pers = st.session_state['rota_personalizada']
+            tab_names.append(f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}")
+            tab_data.append({
+                'tipo': 'personalizada',
+                'dados': rota_pers
+            })
+        else:
+            origem, destino = rota
+            tab_names.append(f"{origem} → {destino}")
+            tab_data.append({
+                'tipo': 'predefinida',
+                'origem': origem,
+                'destino': destino,
+                'dados': ROTAS_POSSIVEIS[(origem, destino)]
+            })
+    
+    tabs = st.tabs(tab_names)
+    
+    for i, tab_info in enumerate(tab_data):
         with tabs[i]:
-            rota_info = ROTAS_POSSIVEIS[(origem, destino)]
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown("**📍 Informações da Rota**")
-                st.write(f"🏁 **Origem:** {origem}")
-                st.write(f"🎯 **Destino:** {destino}")
-                st.write(f"📏 **Distância:** {rota_info['distancia']} km")
-                st.write(f"⏱️ **Tempo Médio:** {rota_info['tempo_medio']}")
-                st.write(f"🛣️ **BR Principal:** {rota_info['principais_brs'][0]}")
-                st.write(f"💰 **Pedágios:** {rota_info['pedagios']}")
-            
-            with col2:
-                st.markdown("**🌤️ Condições Climáticas Reais**")
-                clima_origem = obter_clima_atual(origem)
-                clima_destino = obter_clima_atual(destino)
+            if tab_info['tipo'] == 'personalizada':
+                # Rota personalizada
+                rota_dados = tab_info['dados']
                 
-                # Mostrar informações detalhadas
-                st.write(f"🌡️ **{origem}:**")
-                st.write(f"   • {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
-                st.write(f"   • 💧 Umidade: {clima_origem['umidade']}%")
-                st.write(f"   • 💨 Vento: {clima_origem['vento_kph']} km/h")
-                st.write(f"   • {clima_origem['api_status']}")
+                col1, col2, col3 = st.columns(3)
                 
-                st.write(f"🌡️ **{destino}:**")
-                st.write(f"   • {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
-                st.write(f"   • 💧 Umidade: {clima_destino['umidade']}%")
-                st.write(f"   • 💨 Vento: {clima_destino['vento_kph']} km/h")
-                st.write(f"   • {clima_destino['api_status']}")
+                with col1:
+                    st.markdown("**📍 Informações da Rota Personalizada**")
+                    st.write(f"🏁 **Origem:** {rota_dados['origem_nome']}")
+                    st.write(f"🎯 **Destino:** {rota_dados['destino_nome']}")
+                    st.write(f"📏 **Distância:** {rota_dados['distancia']} km")
+                    st.write(f"⏱️ **Tempo Estimado:** {rota_dados['tempo_estimado']}")
+                    st.write(f"🛣️ **Tipo:** Rota personalizada via geocodificação")
                 
-                # Análise de risco climático combinado
-                risco_climatico = (clima_origem['risco_climatico'] + clima_destino['risco_climatico']) / 2
-                
-                if risco_climatico > 0.6:
-                    st.error(f"🔴 **Alto risco climático:** {risco_climatico:.2f}")
-                    st.write("⚠️ Considere adiar a viagem ou usar rota alternativa")
-                elif risco_climatico > 0.3:
-                    st.warning(f"🟡 **Risco climático moderado:** {risco_climatico:.2f}")
-                    st.write("⚠️ Atenção redobrada e redução de velocidade")
-                else:
-                    st.success(f"🟢 **Condições favoráveis:** {risco_climatico:.2f}")
-                    st.write("✅ Condições ideais para viagem")
-            
-            with col3:
-                st.markdown("**⚠️ Análise de Riscos**")
-                pontos_risco = calcular_pontos_risco_reais(df_datatran, rota_info)
-                
-                if pontos_risco:
-                    risco_medio = np.mean([p["risco"] for p in pontos_risco])
-                    pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
+                with col2:
+                    st.markdown("**🌤️ Condições Climáticas Reais**")
+                    clima_origem = obter_clima_atual(rota_dados['origem_nome'])
+                    clima_destino = obter_clima_atual(rota_dados['destino_nome'])
                     
-                    st.metric("Risco Médio", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos")
-                    st.metric("Pontos Críticos", pontos_criticos)
+                    # Mostrar informações detalhadas
+                    st.write(f"🌡️ **{rota_dados['origem_nome']}:**")
+                    st.write(f"   • {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
+                    st.write(f"   • 💧 Umidade: {clima_origem['umidade']}%")
+                    st.write(f"   • 💨 Vento: {clima_origem['vento_kph']} km/h")
+                    st.write(f"   • {clima_origem['api_status']}")
                     
-                    if risco_medio >= 0.7:
-                        st.error("🔴 **Rota de Alto Risco**")
-                    elif risco_medio >= 0.4:
-                        st.warning("🟡 **Rota de Risco Moderado**")
+                    st.write(f"🌡️ **{rota_dados['destino_nome']}:**")
+                    st.write(f"   • {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
+                    st.write(f"   • 💧 Umidade: {clima_destino['umidade']}%")
+                    st.write(f"   • 💨 Vento: {clima_destino['vento_kph']} km/h")
+                    st.write(f"   • {clima_destino['api_status']}")
+                    
+                    # Análise de risco climático combinado
+                    risco_climatico = (clima_origem['risco_climatico'] + clima_destino['risco_climatico']) / 2
+                    
+                    if risco_climatico > 0.6:
+                        st.error(f"🔴 **Alto risco climático:** {risco_climatico:.2f}")
+                        st.write("⚠️ Considere adiar a viagem ou usar rota alternativa")
+                    elif risco_climatico > 0.3:
+                        st.warning(f"🟡 **Risco climático moderado:** {risco_climatico:.2f}")
+                        st.write("⚠️ Atenção redobrada e redução de velocidade")
                     else:
-                        st.success("🟢 **Rota Segura**")
-                else:
-                    st.info("📊 Análise baseada em dados históricos")
+                        st.success(f"🟢 **Condições favoráveis:** {risco_climatico:.2f}")
+                        st.write("✅ Condições ideais para viagem")
+                
+                with col3:
+                    st.markdown("**⚠️ Análise de Riscos**")
+                    st.info("📊 Análise baseada em estimativas para rota personalizada")
+                    
+                    # Risco estimado baseado na distância
+                    risco_estimado = min(rota_dados['distancia'] / 1000, 0.8)  # Máximo 0.8
+                    
+                    st.metric("Risco Estimado", f"{risco_estimado:.2f}", "baseado na distância")
+                    
+                    if risco_estimado >= 0.6:
+                        st.warning("🟡 **Rota Longa** - Mais paradas recomendadas")
+                    else:
+                        st.success("🟢 **Rota Adequada**")
+            
+            else:
+                # Rota pré-definida (código original)
+                origem = tab_info['origem']
+                destino = tab_info['destino']
+                rota_info = tab_info['dados']
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**📍 Informações da Rota**")
+                    st.write(f"🏁 **Origem:** {origem}")
+                    st.write(f"🎯 **Destino:** {destino}")
+                    st.write(f"📏 **Distância:** {rota_info['distancia']} km")
+                    st.write(f"⏱️ **Tempo Médio:** {rota_info['tempo_medio']}")
+                    st.write(f"🛣️ **BR Principal:** {rota_info['principais_brs'][0]}")
+                    st.write(f"💰 **Pedágios:** {rota_info['pedagios']}")
+                
+                with col2:
+                    st.markdown("**🌤️ Condições Climáticas Reais**")
+                    clima_origem = obter_clima_atual(origem)
+                    clima_destino = obter_clima_atual(destino)
+                    
+                    # Mostrar informações detalhadas
+                    st.write(f"🌡️ **{origem}:**")
+                    st.write(f"   • {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
+                    st.write(f"   • 💧 Umidade: {clima_origem['umidade']}%")
+                    st.write(f"   • 💨 Vento: {clima_origem['vento_kph']} km/h")
+                    st.write(f"   • {clima_origem['api_status']}")
+                    
+                    st.write(f"🌡️ **{destino}:**")
+                    st.write(f"   • {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
+                    st.write(f"   • 💧 Umidade: {clima_destino['umidade']}%")
+                    st.write(f"   • 💨 Vento: {clima_destino['vento_kph']} km/h")
+                    st.write(f"   • {clima_destino['api_status']}")
+                    
+                    # Análise de risco climático combinado
+                    risco_climatico = (clima_origem['risco_climatico'] + clima_destino['risco_climatico']) / 2
+                    
+                    if risco_climatico > 0.6:
+                        st.error(f"🔴 **Alto risco climático:** {risco_climatico:.2f}")
+                        st.write("⚠️ Considere adiar a viagem ou usar rota alternativa")
+                    elif risco_climatico > 0.3:
+                        st.warning(f"🟡 **Risco climático moderado:** {risco_climatico:.2f}")
+                        st.write("⚠️ Atenção redobrada e redução de velocidade")
+                    else:
+                        st.success(f"🟢 **Condições favoráveis:** {risco_climatico:.2f}")
+                        st.write("✅ Condições ideais para viagem")
+                
+                with col3:
+                    st.markdown("**⚠️ Análise de Riscos**")
+                    pontos_risco = calcular_pontos_risco_reais(df_datatran, rota_info)
+                    
+                    if pontos_risco:
+                        risco_medio = np.mean([p["risco"] for p in pontos_risco])
+                        pontos_criticos = len([p for p in pontos_risco if p["risco"] >= 0.7])
+                        
+                        st.metric("Risco Médio", f"{risco_medio:.2f}", f"{len(pontos_risco)} pontos")
+                        st.metric("Pontos Críticos", pontos_criticos)
+                        
+                        if risco_medio >= 0.7:
+                            st.error("🔴 **Rota de Alto Risco**")
+                        elif risco_medio >= 0.4:
+                            st.warning("🟡 **Rota de Risco Moderado**")
+                        else:
+                            st.success("🟢 **Rota Segura**")
+                    else:
+                        st.info("📊 Análise baseada em dados históricos")
 
 # Footer com informações
 st.markdown("---")
