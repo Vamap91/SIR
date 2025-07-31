@@ -251,6 +251,7 @@ def criar_rota_personalizada(origem_coords, destino_coords, origem_nome, destino
         'destino_coords': destino_coords,
         'personalizada': True
     }
+# 🔥 Função para calcular pontos de risco baseado nos dados reais
 def calcular_pontos_risco_reais(df_datatran, rota_info):
     """Calcula pontos de risco baseado nos dados reais do DataTran"""
     pontos_risco = []
@@ -263,31 +264,40 @@ def calcular_pontos_risco_reais(df_datatran, rota_info):
             if not acidentes_br.empty:
                 # Agrupar por coordenadas aproximadas para criar clusters de risco
                 for _, acidente in acidentes_br.sample(min(10, len(acidentes_br))).iterrows():
-                    if pd.notna(acidente.get('latitude')) and pd.notna(acidente.get('longitude')):
+                    # Verificar se as coordenadas são válidas
+                    lat = acidente.get('latitude')
+                    lon = acidente.get('longitude')
+                    
+                    # Validar coordenadas
+                    if (pd.notna(lat) and pd.notna(lon) and 
+                        isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and
+                        -90 <= lat <= 90 and -180 <= lon <= 180):
+                        
                         # Calcular nível de risco baseado na gravidade
                         risco = 0.3  # Base
-                        if 'mortos' in acidente and acidente['mortos'] > 0:
+                        if 'mortos' in acidente and pd.notna(acidente['mortos']) and acidente['mortos'] > 0:
                             risco += 0.4
-                        if 'feridos_graves' in acidente and acidente['feridos_graves'] > 0:
+                        if 'feridos_graves' in acidente and pd.notna(acidente['feridos_graves']) and acidente['feridos_graves'] > 0:
                             risco += 0.2
-                        if 'condicao_metereologica' in acidente and 'chuva' in str(acidente['condicao_metereologica']).lower():
-                            risco += 0.1
+                        if 'condicao_metereologica' in acidente and pd.notna(acidente['condicao_metereologica']):
+                            if 'chuva' in str(acidente['condicao_metereologica']).lower():
+                                risco += 0.1
                         
                         pontos_risco.append({
                             "nome": f"BR-{br} KM {acidente.get('km', '?')}",
-                            "coords": (acidente['latitude'], acidente['longitude']),
+                            "coords": (float(lat), float(lon)),  # Garantir que são float
                             "risco": min(risco, 1.0),
                             "detalhes": {
-                                "municipio": acidente.get('municipio', 'N/A'),
-                                "tipo_acidente": acidente.get('tipo_acidente', 'N/A'),
-                                "mortos": acidente.get('mortos', 0),
-                                "feridos": acidente.get('feridos', 0)
+                                "municipio": str(acidente.get('municipio', 'N/A'))[:50],  # Limitar tamanho
+                                "tipo_acidente": str(acidente.get('tipo_acidente', 'N/A'))[:50],
+                                "mortos": int(acidente.get('mortos', 0)) if pd.notna(acidente.get('mortos')) else 0,
+                                "feridos": int(acidente.get('feridos', 0)) if pd.notna(acidente.get('feridos')) else 0
                             }
                         })
     
-    # Se não tem dados reais, usar pontos simulados da rota
-    if not pontos_risco:
-        pontos_risco = rota_info.get("pontos_risco", [])
+    # Se não tem dados reais suficientes, usar pontos simulados da rota
+    if len(pontos_risco) < 2:
+        pontos_risco.extend(rota_info.get("pontos_risco", []))
     
     return pontos_risco
 
@@ -653,6 +663,33 @@ with st.sidebar:
 # Conteúdo principal
 if not rotas_selecionadas:
     st.warning("⚠️ Selecione pelo menos uma rota na barra lateral para visualizar o mapa.")
+    
+    # Mostrar exemplo de como usar
+    with st.expander("💡 Como usar este sistema"):
+        st.markdown("""
+        ### 🎯 **Opções de Rota:**
+        
+        **1. 🏢 Cidades Pré-definidas:**
+        - Selecione uma ou mais rotas entre cidades principais
+        - Dados otimizados com informações de BRs, pedágios e tempos
+        
+        **2. 📍 Endereços Personalizados:**
+        - Digite qualquer endereço do Brasil
+        - Sistema faz geocodificação automática
+        - Calcula distância e tempo estimado
+        
+        ### 🔥 **Visualização de Riscos:**
+        - Ative o toggle "Exibir Pontos de Risco"
+        - Bolhas vermelhas mostram locais perigosos
+        - Baseado em dados reais de acidentes
+        - Clique nas bolhas para ver detalhes
+        
+        ### 📊 **Dados:**
+        - Upload do datatran2025.zip para dados reais
+        - Integração com WeatherAPI para clima
+        - Análise inteligente de múltiplos fatores
+        """)
+    
     st.stop()
 
 # Carregar dados do DataTran
