@@ -1,1 +1,24 @@
-streamlit
+# Core Streamlit
+streamlit==1.35.0
+
+# Mapas e Visualização
+folium==0.16.0
+streamlit-folium==0.19.0
+
+# Análise de Dados
+pandas==2.1.0
+numpy==1.24.3
+
+# APIs e Requisições
+requests==2.31.0
+
+# Manipulação de Arquivos
+openpyxl==3.1.2  # Para arquivos Excel
+xlrd==2.0.1      # Para arquivos Excel antigos
+
+# Utilitários de Data/Hora
+python-dateutil==2.8.2
+
+# Opcional: Para análises mais avançadas
+scipy==1.11.0    # Estatísticas
+scikit-learn==1.3.0  # Machine Learning (se precisar no futuro)
