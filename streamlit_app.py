@@ -566,6 +566,9 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🎯 Rota Personalizada")
     
+    # Inicializar lista de rotas selecionadas
+    rotas_selecionadas = []
+    
     # Opção entre rotas pré-definidas ou endereços personalizados
     modo_selecao = st.radio(
         "Como deseja definir a rota?",
@@ -634,14 +637,14 @@ with st.sidebar:
     
     st.markdown("### 🗺️ Configurações do Mapa")
     
-    # Seleção de múltiplas rotas
-    st.markdown("**Selecione as rotas para análise:**")
-    rotas_selecionadas = []
-    
-    for i, ((origem, destino), info) in enumerate(ROTAS_POSSIVEIS.items()):
-        key = f"rota_{i}"
-        if st.checkbox(f"{origem} → {destino} ({info['distancia']}km)", key=key):
-            rotas_selecionadas.append((origem, destino))
+    # Seleção de múltiplas rotas pré-definidas (só se não estiver no modo personalizado)
+    if modo_selecao == "🏢 Cidades pré-definidas":
+        st.markdown("**Selecione as rotas para análise:**")
+        
+        for i, ((origem, destino), info) in enumerate(ROTAS_POSSIVEIS.items()):
+            key = f"rota_{i}"
+            if st.checkbox(f"{origem} → {destino} ({info['distancia']}km)", key=key):
+                rotas_selecionadas.append((origem, destino))
     
     st.markdown("---")
     
