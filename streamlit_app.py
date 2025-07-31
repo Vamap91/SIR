@@ -224,34 +224,312 @@ def geocodificar_endereco(endereco):
     except Exception as e:
         return {'status': 'erro', 'message': f'Erro na geocodificação: {str(e)[:50]}...'}
 
-# 🗺️ Função para criar rota personalizada entre dois endereços
+# 🗺️ Função para obter rota real seguindo estradas
+@st.cache_data(ttl=3600)  # Cache por 1 hora
+def obter_rota_real_estradas(origem_coords, destino_coords):
+    """Obtém rota real seguindo estradas usando OpenRouteService (gratuito)"""
+    try:
+        # Usar OpenRouteService (5000 requests/dia gratuitos)
+        # Alternativa: usar OSRM (completamente gratuito)
+        
+        # OSRM (Open Source Routing Machine) - Completamente gratuito
+        url = "http://router.project-osrm.org/route/v1/driving/"
+        coords = f"{origem_coords[1]},{origem_coords[0]};{destino_coords[1]},{destino_coords[0]}"
+        params = {
+            'overview': 'full',
+            'geometries': 'geojson',
+            'steps': 'true'
+        }
+        
+        response = requests.get(f"{url}{coords}", params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if data['code'] == 'Ok' and len(data['routes']) > 0:
+                route = data['routes'][0]
+                
+                # Extrair coordenadas da rota
+                coordinates = route['geometry']['coordinates']
+                # OSRM retorna [lon, lat], precisamos [lat, lon] para folium
+                rota_coords = [(coord[1], coord[0]) for coord in coordinates]
+                
+                return {
+                    'coordenadas': rota_coords,
+                    'distancia_real': round(route['distance'] / 1000, 1),  # metros para km
+                    'tempo_real': round(route['duration'] / 60, 0),  # segundos para minutos
+                    'status': 'sucesso',
+                    'fonte': 'OSRM (estradas reais)'
+                }
+        
+        # Fallback: se OSRM falhar, tentar GraphHopper (também gratuito)
+        return obter_rota_graphhopper(origem_coords, destino_coords)
+        
+    except Exception as e:
+        return {
+            'status': 'erro',
+            'message': f'Erro no roteamento: {str(e)[:50]}...',
+            'coordenadas': [origem_coords, destino_coords],  # Linha reta como fallback
+            'distancia_real': None,
+            'tempo_real': None
+        }
+
+@st.cache_data(ttl=3600)
+def obter_rota_graphhopper(origem_coords, destino_coords):
+    """Fallback usando GraphHopper (também gratuito, mas com limite menor)"""
+    try:
+        url = "https://graphhopper.com/api/1/route"
+        params = {
+            'point': [f"{origem_coords[0]},{origem_coords[1]}", f"{destino_coords[0]},{destino_coords[1]}"],
+            'vehicle': 'car',
+            'locale': 'pt-BR',
+            'calc_points': 'true',
+            'type': 'json'
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if len(data['paths']) > 0:
+                path = data['paths'][0]
+                
+                # Decodificar coordenadas (GraphHopper usa encoding especial)
+                points = path.get('points', {})
+                if 'coordinates' in points:
+                    # Coordenadas já decodificadas
+                    coordinates = points['coordinates']
+                    rota_coords = [(coord[1], coord[0]) for coord in coordinates]  # [lon,lat] -> [lat,lon]
+                else:
+                    # Usar apenas origem e destino
+                    rota_coords = [origem_coords, destino_coords]
+                
+                return {
+                    'coordenadas': rota_coords,
+                    'distancia_real': round(path['distance'] / 1000, 1),
+                    'tempo_real': round(path['time'] / 60000, 0),  # ms para minutos
+                    'status': 'sucesso',
+                    'fonte': 'GraphHopper (estradas reais)'
+                }
+    
+    except Exception:
+        pass
+    
+    # Último fallback: linha reta
+    return {
+        'status': 'fallback',
+        'coordenadas': [origem_coords, destino_coords],
+        'distancia_real': None,
+        'tempo_real': None,
+        'fonte': 'Linha reta (fallback)'
+    }
 def criar_rota_personalizada(origem_coords, destino_coords, origem_nome, destino_nome):
-    """Calcula distância e cria informações de rota entre coordenadas personalizadas"""
-    from math import radians, cos, sin, asin, sqrt
+    """Calcula rota real seguindo estradas entre coordenadas personalizadas"""
     
-    # Fórmula de Haversine para calcular distância
-    def haversine(lon1, lat1, lon2, lat2):
-        lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-        dlon = lon2 - lon1
-        dlat = lat2 - lat1
-        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-        c = 2 * asin(sqrt(a))
-        r = 6371  # Raio da Terra em km
-        return c * r
+    # Obter rota real seguindo estradas
+    rota_real = obter_rota_real_estradas(origem_coords, destino_coords)
     
-    distancia = haversine(origem_coords[1], origem_coords[0], destino_coords[1], destino_coords[0])
-    tempo_estimado = distancia / 80  # Velocidade média 80 km/h
+    if rota_real['status'] == 'sucesso':
+        # Usar dados reais da API de roteamento
+        distancia = rota_real['distancia_real']
+        tempo_minutos = rota_real['tempo_real']
+        tempo_formatado = f"{int(tempo_minutos // 60)}h{int(tempo_minutos % 60)}min" if tempo_minutos >= 60 else f"{int(tempo_minutos)}min"
+        coordenadas_rota = rota_real['coordenadas']
+        fonte_info = rota_real['fonte']
+    else:
+        # Fallback: cálculo manual (Haversine)
+        from math import radians, cos, sin, asin, sqrt
+        
+        def haversine(lon1, lat1, lon2, lat2):
+            lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+            dlon = lon2 - lon1
+            dlat = lat2 - lat1
+            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+            c = 2 * asin(sqrt(a))
+            r = 6371  # Raio da Terra em km
+            return c * r
+        
+        distancia = round(haversine(origem_coords[1], origem_coords[0], destino_coords[1], destino_coords[0]), 1)
+        tempo_estimado = distancia / 60  # Velocidade média urbana 60 km/h
+        tempo_formatado = f"{int(tempo_estimado)}h{int((tempo_estimado % 1) * 60)}min"
+        coordenadas_rota = [origem_coords, destino_coords]  # Linha reta
+        fonte_info = "Estimativa (linha reta)"
     
     return {
-        'distancia': round(distancia, 1),
-        'tempo_estimado': f"{int(tempo_estimado)}h{int((tempo_estimado % 1) * 60)}min",
+        'distancia': distancia,
+        'tempo_estimado': tempo_formatado,
         'origem_nome': origem_nome,
         'destino_nome': destino_nome,
         'origem_coords': origem_coords,
         'destino_coords': destino_coords,
+        'coordenadas_rota': coordenadas_rota,  # Coordenadas da rota real
+        'fonte_roteamento': fonte_info,
         'personalizada': True
     }
-# 🔥 Função para calcular pontos de risco baseado nos dados reais
+# 🔍 Função para gerar explicação inteligente do risco
+def gerar_explicacao_risco(ponto_risco, df_datatran=None):
+    """Gera explicação detalhada do porque do risco e recomendações"""
+    
+    risco = ponto_risco.get("risco", 0.3)
+    detalhes = ponto_risco.get("detalhes", {})
+    nome = ponto_risco.get("nome", "Ponto de Risco")
+    
+    # Análise dos fatores de risco
+    fatores = []
+    recomendacoes = []
+    nivel_blindagem = "não necessária"
+    
+    # Analisar mortalidade
+    mortos = detalhes.get('mortos', 0)
+    feridos_graves = detalhes.get('feridos_graves', 0)
+    
+    if mortos > 0:
+        fatores.append(f"❌ {mortos} morte(s) registrada(s)")
+        recomendacoes.append("🚨 Extrema cautela necessária")
+        if mortos >= 2:
+            nivel_blindagem = "altamente recomendada"
+    
+    if feridos_graves > 0:
+        fatores.append(f"🏥 {feridos_graves} ferido(s) grave(s)")
+        recomendacoes.append("⚠️ Risco de acidentes severos")
+    
+    # Analisar tipo de acidente
+    tipo_acidente = detalhes.get('tipo_acidente', '').lower()
+    if 'tombamento' in tipo_acidente:
+        fatores.append("🔄 Histórico de tombamentos")
+        recomendacoes.append("📦 Cuidado com carga alta/pesada")
+    elif 'colisão' in tipo_acidente:
+        fatores.append("💥 Histórico de colisões")
+        recomendacoes.append("👀 Mantenha distância segura")
+    elif 'capotamento' in tipo_acidente:
+        fatores.append("🔄 Histórico de capotamentos")
+        recomendacoes.append("🐌 Reduzir velocidade significativamente")
+    
+    # Analisar localização
+    municipio = detalhes.get('municipio', '').lower()
+    if any(palavra in municipio for palavra in ['rio de janeiro', 'são paulo', 'salvador']):
+        fatores.append("🏙️ Região metropolitana de alta criminalidade")
+        recomendacoes.append("🛡️ Considerar rota alternativa ou escolta")
+        if risco >= 0.7:
+            nivel_blindagem = "recomendada"
+    
+    # Classificação de risco por valor
+    if risco >= 0.8:
+        classificacao = "🔴 CRÍTICO"
+        explicacao_geral = "Este ponto apresenta RISCO EXTREMO baseado em dados históricos"
+        nivel_blindagem = "altamente recomendada"
+        recomendacoes.extend([
+            "🚫 EVITAR este trecho se possível",
+            "🛡️ Se inevitável: usar veículo blindado",
+            "👮 Considerar escolta policial",
+            "📱 Manter comunicação constante",
+            "⏰ Evitar horários de pico e madrugada"
+        ])
+    elif risco >= 0.6:
+        classificacao = "🟠 ALTO"
+        explicacao_geral = "Este ponto apresenta RISCO ELEVADO que requer precauções especiais"
+        nivel_blindagem = "recomendada para cargas de alto valor"
+        recomendacoes.extend([
+            "🛡️ Veículo blindado recomendado",
+            "👥 Não viajar sozinho",
+            "📍 Evitar paradas desnecessárias",
+            "🌅 Preferir horários diurnos"
+        ])
+    elif risco >= 0.4:
+        classificacao = "🟡 MODERADO"
+        explicacao_geral = "Este ponto apresenta RISCO MODERADO com precauções básicas necessárias"
+        recomendacoes.extend([
+            "👀 Atenção redobrada",
+            "📱 GPS e comunicação ativos",
+            "⛽ Tanque cheio antes de passar",
+            "🚗 Veículo em bom estado"
+        ])
+    else:
+        classificacao = "🟢 BAIXO"
+        explicacao_geral = "Este ponto apresenta RISCO BAIXO mas ainda requer atenção básica"
+        recomendacoes.extend([
+            "✅ Trânsito relativamente seguro",
+            "🚗 Precauções normais de trânsito",
+            "📱 Manter comunicação de emergência"
+        ])
+    
+    # Recomendações específicas por horário
+    recomendacoes_horario = []
+    if risco >= 0.5:
+        recomendacoes_horario = [
+            "🌅 MELHOR: 06h-10h (movimento policial)",
+            "⚠️ CUIDADO: 18h-22h (rush + escuridão)",
+            "🚫 EVITAR: 22h-06h (baixo policiamento)"
+        ]
+    
+    # Tipo de veículo recomendado
+    if risco >= 0.7:
+        veiculo_recomendado = "🛡️ BLINDADO Nível III + escolta"
+    elif risco >= 0.5:
+        veiculo_recomendado = "🛡️ BLINDADO Nível II ou veículo discreto"
+    elif risco >= 0.3:
+        veiculo_recomendado = "🚗 Veículo comum, evitar ostentação"
+    else:
+        veiculo_recomendado = "🚗 Qualquer veículo em bom estado"
+    
+    # Montar explicação completa
+    explicacao_completa = f"""
+<div style='max-width: 350px; font-size: 12px; line-height: 1.3;'>
+    <h4 style='margin: 5px 0; color: #333;'>🎯 {nome}</h4>
+    <h5 style='margin: 5px 0;'>{classificacao} - Risco: {risco:.2f}</h5>
+    
+    <p style='margin: 5px 0; font-weight: bold;'>{explicacao_geral}</p>
+    
+    <h6 style='margin: 8px 0 3px 0; color: #d63384;'>📊 FATORES DE RISCO:</h6>
+    <ul style='margin: 0; padding-left: 15px;'>
+"""
+    
+    # Adicionar fatores identificados
+    if fatores:
+        for fator in fatores:
+            explicacao_completa += f"<li>{fator}</li>"
+    else:
+        explicacao_completa += "<li>📈 Análise baseada em padrões estatísticos</li>"
+    
+    explicacao_completa += f"""
+    </ul>
+    
+    <h6 style='margin: 8px 0 3px 0; color: #0d6efd;'>🛡️ BLINDAGEM:</h6>
+    <p style='margin: 0 0 5px 0; font-weight: bold;'>{nivel_blindagem.upper()}</p>
+    
+    <h6 style='margin: 8px 0 3px 0; color: #198754;'>🚗 VEÍCULO:</h6>
+    <p style='margin: 0 0 5px 0;'>{veiculo_recomendado}</p>
+    
+    <h6 style='margin: 8px 0 3px 0; color: #fd7e14;'>⚠️ RECOMENDAÇÕES:</h6>
+    <ul style='margin: 0; padding-left: 15px;'>
+"""
+    
+    # Adicionar recomendações principais
+    for rec in recomendacoes[:4]:  # Limitar para não ficar muito grande
+        explicacao_completa += f"<li>{rec}</li>"
+    
+    # Adicionar recomendações de horário se relevante
+    if recomendacoes_horario:
+        explicacao_completa += """
+    </ul>
+    
+    <h6 style='margin: 8px 0 3px 0; color: #6f42c1;'>⏰ HORÁRIOS:</h6>
+    <ul style='margin: 0; padding-left: 15px;'>
+"""
+        for rec_h in recomendacoes_horario:
+            explicacao_completa += f"<li>{rec_h}</li>"
+    
+    explicacao_completa += """
+    </ul>
+    
+    <p style='margin: 8px 0 0 0; font-size: 10px; color: #666;'>
+        💡 Análise baseada em dados históricos do DataTran e padrões de criminalidade
+    </p>
+</div>
+"""
+    
+    return explicacao_completa
 def calcular_pontos_risco_reais(df_datatran, rota_info):
     """Calcula pontos de risco baseado nos dados reais do DataTran"""
     pontos_risco = []
@@ -336,17 +614,32 @@ def criar_mapa_rotas(rotas_selecionadas, mostrar_riscos, df_datatran):
         if rota == 'PERSONALIZADA' and 'rota_personalizada' in st.session_state:
             rota_pers = st.session_state['rota_personalizada']
             
+            # Usar coordenadas da rota real se disponível
+            if 'coordenadas_rota' in rota_pers and len(rota_pers['coordenadas_rota']) > 2:
+                # Rota real seguindo estradas
+                coordenadas_rota = rota_pers['coordenadas_rota']
+                popup_texto = f"<b>ROTA PERSONALIZADA</b><br>" \
+                             f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}<br>" \
+                             f"📏 {rota_pers['distancia']} km<br>" \
+                             f"⏱️ {rota_pers['tempo_estimado']}<br>" \
+                             f"🛣️ {rota_pers.get('fonte_roteamento', 'Rota real')}<br>" \
+                             f"🚗 Seguindo estradas"
+            else:
+                # Fallback: linha reta
+                coordenadas_rota = [rota_pers['origem_coords'], rota_pers['destino_coords']]
+                popup_texto = f"<b>ROTA PERSONALIZADA</b><br>" \
+                             f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}<br>" \
+                             f"📏 {rota_pers['distancia']} km<br>" \
+                             f"⏱️ {rota_pers['tempo_estimado']}<br>" \
+                             f"📐 Linha reta (estimativa)"
+            
             # Adicionar linha da rota personalizada
             folium.PolyLine(
-                locations=[rota_pers['origem_coords'], rota_pers['destino_coords']],
+                locations=coordenadas_rota,
                 color=cor_rota,
-                weight=6,
+                weight=4,
                 opacity=0.8,
-                popup=f"<b>ROTA PERSONALIZADA</b><br>"
-                      f"{rota_pers['origem_nome']} → {rota_pers['destino_nome']}<br>"
-                      f"📏 {rota_pers['distancia']} km<br>"
-                      f"⏱️ {rota_pers['tempo_estimado']}<br>"
-                      f"🛣️ Rota personalizada"
+                popup=popup_texto
             ).add_to(mapa)
             
             # Marcadores para rota personalizada
@@ -657,11 +950,16 @@ with st.sidebar:
     
     if mostrar_riscos:
         st.markdown("🔴 **Modo Risco Ativado**")
-        st.markdown("• Bolhas grandes = Alto risco")
-        st.markdown("• Bolhas pequenas = Baixo risco")
-        st.markdown("• Vermelho = Crítico (>0.7)")
-        st.markdown("• Laranja = Alto (0.5-0.7)")
-        st.markdown("• Amarelo = Moderado (<0.5)")
+        st.markdown("**📊 Interpretação das Bolhas:**")
+        st.markdown("• **Tamanho**: Proporcional ao nível de risco")
+        st.markdown("• **🔴 Vermelho**: Crítico (>0.7) - Blindagem altamente recomendada")
+        st.markdown("• **🟠 Laranja**: Alto (0.5-0.7) - Blindagem recomendada")
+        st.markdown("• **🟡 Amarelo**: Moderado (<0.5) - Precauções básicas")
+        st.markdown("**💡 Clique nas bolhas para:**")
+        st.markdown("• Ver análise detalhada dos fatores de risco")
+        st.markdown("• Recomendações de blindagem e veículo")
+        st.markdown("• Melhores horários para trafegar")
+        st.markdown("• Estratégias de segurança específicas")
 
 # Conteúdo principal
 if not rotas_selecionadas:
@@ -789,7 +1087,14 @@ if rotas_selecionadas:
                     st.write(f"🎯 **Destino:** {rota_dados['destino_nome']}")
                     st.write(f"📏 **Distância:** {rota_dados['distancia']} km")
                     st.write(f"⏱️ **Tempo Estimado:** {rota_dados['tempo_estimado']}")
-                    st.write(f"🛣️ **Tipo:** Rota personalizada via geocodificação")
+                    st.write(f"🛣️ **Roteamento:** {rota_dados.get('fonte_roteamento', 'Geocodificação')}")
+                    
+                    # Indicar se é rota real ou estimada
+                    if 'coordenadas_rota' in rota_dados and len(rota_dados['coordenadas_rota']) > 2:
+                        st.success("✅ Rota real seguindo estradas")
+                        st.write(f"📍 **Pontos da rota:** {len(rota_dados['coordenadas_rota'])} coordenadas")
+                    else:
+                        st.info("📐 Estimativa em linha reta")
                 
                 with col2:
                     st.markdown("**🌤️ Condições Climáticas Reais**")
