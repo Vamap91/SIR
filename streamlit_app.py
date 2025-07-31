@@ -292,19 +292,114 @@ def criar_mapa_rotas(rotas_selecionadas, mostrar_riscos, df_datatran):
     
     return mapa
 
-# 🌤️ Função para buscar dados climáticos (API exemplo)
+# 🌤️ Configuração da API climática
+# Busca a chave nos secrets do Streamlit Cloud
+try:
+    WEATHER_API_KEY = st.secrets["WEATHER_API_KEY"]
+except KeyError:
+    WEATHER_API_KEY = None
+    st.error("⚠️ WEATHER_API_KEY não encontrada nos secrets do Streamlit Cloud")
+
 @st.cache_data(ttl=1800)  # Cache por 30 minutos
 def obter_clima_atual(cidade):
-    """Obtém condições climáticas atuais (simulado)"""
-    # Simulação de API climática
+    """Obtém condições climáticas atuais usando WeatherAPI"""
+    
+    if not WEATHER_API_KEY:
+        # Se não tem API key configurada, usar dados simulados
+        condicoes = ['Ensolarado', 'Parcialmente nublado', 'Nublado', 'Chuva leve', 'Chuva forte']
+        temperatura = random.randint(18, 32)
+        condicao = random.choice(condicoes)
+        
+        return {
+            "temperatura": temperatura,
+            "condicao": condicao,
+            "umidade": random.randint(40, 80),
+            "vento_kph": random.randint(5, 25),
+            "risco_climatico": 0.7 if 'forte' in condicao else 0.3 if 'Chuva' in condicao else 0.1,
+            "api_status": "⚠️ API key não configurada - dados simulados"
+        }
+    
+    try:
+        # URL da WeatherAPI (weatherapi.com)
+        url = f"http://api.weatherapi.com/v1/current.json"
+        params = {
+            'key': WEATHER_API_KEY,
+            'q': f"{cidade}, Brasil",
+            'lang': 'pt',
+            'aqi': 'no'
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Extrair dados relevantes
+            current = data['current']
+            condicao = current['condition']['text']
+            temperatura = current['temp_c']
+            umidade = current['humidity']
+            vento_kph = current['wind_kph']
+            
+            # Calcular risco climático baseado nas condições
+            risco_climatico = 0.1  # Base
+            
+            # Aumentar risco por condições adversas
+            condicao_lower = condicao.lower()
+            if any(palavra in condicao_lower for palavra in ['chuva forte', 'tempestade', 'temporal']):
+                risco_climatico += 0.7
+            elif any(palavra in condicao_lower for palavra in ['chuva', 'chuvisco', 'garoa']):
+                risco_climatico += 0.4
+            elif any(palavra in condicao_lower for palavra in ['nevoeiro', 'neblina', 'cerração']):
+                risco_climatico += 0.5
+            elif 'nublado' in condicao_lower:
+                risco_climatico += 0.1
+                
+            # Ajustar por vento forte
+            if vento_kph > 50:
+                risco_climatico += 0.3
+            elif vento_kph > 30:
+                risco_climatico += 0.1
+                
+            # Ajustar por umidade muito alta
+            if umidade > 85:
+                risco_climatico += 0.1
+            
+            return {
+                "temperatura": temperatura,
+                "condicao": condicao,
+                "umidade": umidade,
+                "vento_kph": vento_kph,
+                "risco_climatico": min(risco_climatico, 1.0),
+                "api_status": "✅ Dados reais da WeatherAPI"
+            }
+        
+        elif response.status_code == 401:
+            st.error("🔑 API key inválida ou expirada")
+        elif response.status_code == 403:
+            st.error("🚫 Cota da API esgotada")
+        else:
+            st.warning(f"⚠️ API retornou erro {response.status_code}")
+            
+    except requests.exceptions.Timeout:
+        st.warning("⏱️ Timeout na API climática - usando dados simulados")
+    except requests.exceptions.RequestException as e:
+        st.warning(f"🌐 Erro na conexão com API: {str(e)[:50]}...")
+    except Exception as e:
+        st.warning(f"❌ Erro inesperado: {str(e)[:50]}...")
+    
+    # Fallback: dados simulados se API falhar
     condicoes = ['Ensolarado', 'Parcialmente nublado', 'Nublado', 'Chuva leve', 'Chuva forte']
-    temperatura = random.randint(15, 35)
+    temperatura = random.randint(18, 32)
     condicao = random.choice(condicoes)
     
     return {
         "temperatura": temperatura,
         "condicao": condicao,
-        "risco_climatico": 0.8 if 'Chuva forte' in condicao else 0.3 if 'Chuva' in condicao else 0.1
+        "umidade": random.randint(40, 80),
+        "vento_kph": random.randint(5, 25),
+        "risco_climatico": 0.7 if 'forte' in condicao else 0.3 if 'Chuva' in condicao else 0.1,
+        "api_status": "⚠️ Dados simulados (API indisponível)"
     }
 
 # 🎛️ Interface Principal
@@ -408,18 +503,35 @@ if rotas_selecionadas:
                 st.write(f"💰 **Pedágios:** {rota_info['pedagios']}")
             
             with col2:
-                st.markdown("**🌤️ Condições Atuais**")
+                st.markdown("**🌤️ Condições Climáticas Reais**")
                 clima_origem = obter_clima_atual(origem)
                 clima_destino = obter_clima_atual(destino)
                 
-                st.write(f"🌡️ **{origem}:** {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
-                st.write(f"🌡️ **{destino}:** {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
+                # Mostrar informações detalhadas
+                st.write(f"🌡️ **{origem}:**")
+                st.write(f"   • {clima_origem['temperatura']}°C, {clima_origem['condicao']}")
+                st.write(f"   • 💧 Umidade: {clima_origem['umidade']}%")
+                st.write(f"   • 💨 Vento: {clima_origem['vento_kph']} km/h")
+                st.write(f"   • {clima_origem['api_status']}")
                 
+                st.write(f"🌡️ **{destino}:**")
+                st.write(f"   • {clima_destino['temperatura']}°C, {clima_destino['condicao']}")
+                st.write(f"   • 💧 Umidade: {clima_destino['umidade']}%")
+                st.write(f"   • 💨 Vento: {clima_destino['vento_kph']} km/h")
+                st.write(f"   • {clima_destino['api_status']}")
+                
+                # Análise de risco climático combinado
                 risco_climatico = (clima_origem['risco_climatico'] + clima_destino['risco_climatico']) / 2
-                if risco_climatico > 0.5:
-                    st.warning(f"⚠️ Risco climático elevado: {risco_climatico:.2f}")
+                
+                if risco_climatico > 0.6:
+                    st.error(f"🔴 **Alto risco climático:** {risco_climatico:.2f}")
+                    st.write("⚠️ Considere adiar a viagem ou usar rota alternativa")
+                elif risco_climatico > 0.3:
+                    st.warning(f"🟡 **Risco climático moderado:** {risco_climatico:.2f}")
+                    st.write("⚠️ Atenção redobrada e redução de velocidade")
                 else:
-                    st.success(f"✅ Condições climáticas favoráveis: {risco_climatico:.2f}")
+                    st.success(f"🟢 **Condições favoráveis:** {risco_climatico:.2f}")
+                    st.write("✅ Condições ideais para viagem")
             
             with col3:
                 st.markdown("**⚠️ Análise de Riscos**")
